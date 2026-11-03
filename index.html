@@ -52,7 +52,6 @@
         .driver-subcard p.label-day { color: var(--accent-amber); font-weight: 800; font-size: 10px; }
         .driver-subcard p.label-night { color: var(--accent-indigo); font-weight: 800; font-size: 10px; }
         .driver-subcard p.name { font-size: 11px; font-weight: 700; color: #fff; margin-top: 2px; }
-        .driver-subcard p.phone { font-size: 9px; color: var(--text-sub); }
         .btn-del-sm { background: transparent; border: none; color: var(--accent-red); font-size: 12px; cursor: pointer; padding: 2px; }
         
         .fin-row { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 12px; padding: 10px; margin-bottom: 12px; }
@@ -80,11 +79,9 @@
         .sched-table th { background: rgba(15, 23, 42, 0.8); color: var(--text-sub); padding: 4px; border: 1px solid var(--border-color); }
         .sched-table td { padding: 4px; border: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.4); }
         
-        /* قسم ملاحظات السائق في الإدارة */
         .admin-notes-box { background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-size: 10px; max-height: 100px; overflow-y: auto; }
         .admin-note-item { padding: 4px; border-bottom: 1px solid rgba(51, 65, 85, 0.4); }
 
-        .odometer-box { background: rgba(30, 41, 59, 0.8); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; font-size: 10px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         .pay-salary-box { display: flex; justify-content: space-between; align-items: center; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 8px 10px; border-radius: 8px; }
         .btn-pay { background-color: var(--accent-green); color: #000; border: none; padding: 6px 12px; border-radius: 6px; font-weight: 800; font-size: 10px; cursor: pointer; }
         .btn-pay.paid { background-color: var(--border-color); color: var(--text-sub); cursor: default; }
@@ -231,16 +228,6 @@
         </div>
     </div>
 
-    <div id="imageModal" class="modal">
-        <div class="modal-content" style="text-align:center;">
-            <div class="modal-header">
-                <span style="font-weight:800; color:var(--accent-amber); font-size:13px;">صورة العداد</span>
-                <button onclick="closeModal('imageModal')" class="modal-close">✕</button>
-            </div>
-            <img id="modalOdoImg" src="" alt="غير متوفرة" style="width:100%; border-radius:10px; margin-top:8px;">
-        </div>
-    </div>
-
     <!-- Firebase Compat SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -288,11 +275,6 @@
         }
         setInterval(measureConnectionLatency, 5000);
 
-        function formatTime(timestamp) {
-            if (!timestamp) return '--:--';
-            return new Date(timestamp).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true });
-        }
-
         function getSaturdayWeekId(dateObj = new Date()) {
             const d = new Date(dateObj);
             const day = d.getDay();
@@ -324,7 +306,6 @@
         };
 
         let pendingDeleteAction = null;
-        let adminShiftStartTimes = {};
 
         if (window.appState.cars.length > 0) renderApp();
         measureConnectionLatency();
@@ -354,7 +335,6 @@
             renderAdvanceNotifications();
         });
 
-        // الاستماع الفوري لملاحظات السائقين
         db.ref('notes').on('value', (snapshot) => {
             window.appState.driverNotes = snapshot.val() || {};
             renderWeeklyFinancialList();
@@ -365,7 +345,6 @@
             updateLiveTimersAndSalaries();
         });
 
-        // رد الإدارة على السائق
         window.sendAdminReply = function(driverName) {
             const inputEl = document.getElementById(`reply_input_${driverName.replace(/\s+/g, '_')}`);
             if (!inputEl) return;
@@ -422,6 +401,7 @@
                 if (!rec.days) rec.days = {};
                 if (!rec.days[todayKey]) rec.days[todayKey] = {};
                 rec.days[todayKey].endTime = endTime;
+                rec.days[todayKey].hours = (rec.days[todayKey].hours || 0) + elapsedHours;
                 rec.days[todayKey].status = 'present';
                 if (!rec.days[todayKey].startTime) rec.days[todayKey].startTime = startTime;
 
@@ -483,6 +463,8 @@
 
         function updateLiveTimersAndSalaries() {
             const weekData = window.appState.weeklyRecords[window.currentActiveWeek] || {};
+            const todayKey = new Date().toISOString().split('T')[0];
+
             getAllDrivers().forEach(d => {
                 const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, days: {} };
                 let isOnDuty = false, activeCarId = null;
@@ -496,7 +478,11 @@
                     shiftStartTime = window.appState.activeShifts[activeCarId]?.timestamp || rec.imgTimestamp || Date.now();
                     liveSecs = Math.max(0, (Date.now() - shiftStartTime) / 1000);
                 }
+
                 let totalHours = (rec.hours || 0) + (liveSecs / 3600);
+                const storedTodayHours = (rec.days && rec.days[todayKey] && rec.days[todayKey].hours) || 0;
+                let todayHours = storedTodayHours + (isOnDuty ? (liveSecs / 3600) : 0);
+
                 let liveSalary = totalHours * HOURLY_RATE;
                 let netDue = liveSalary + (rec.rewards || 0) - (rec.advances || 0);
 
@@ -505,6 +491,12 @@
                     let sTot = Math.floor(totalHours * 3600);
                     timerEl.innerText = `⏱️ ${Math.floor(sTot/3600).toString().padStart(2,'0')}:${Math.floor((sTot%3600)/60).toString().padStart(2,'0')}:${(sTot%60).toString().padStart(2,'0')}`;
                 }
+                const todayHoursEl = document.getElementById(`today_hours_${d.name.replace(/\s+/g, '_')}`);
+                if (todayHoursEl) todayHoursEl.innerText = `${todayHours.toFixed(1)} س`;
+
+                const weekHoursEl = document.getElementById(`week_hours_${d.name.replace(/\s+/g, '_')}`);
+                if (weekHoursEl) weekHoursEl.innerText = `${totalHours.toFixed(1)} س`;
+
                 const salaryEl = document.getElementById(`salary_${d.name.replace(/\s+/g, '_')}`);
                 if (salaryEl) salaryEl.innerText = `${Math.round(liveSalary).toLocaleString()} ل.س`;
                 const netEl = document.getElementById(`net_${d.name.replace(/\s+/g, '_')}`);
@@ -669,7 +661,7 @@
             const todayStr = new Date().toISOString().split('T')[0];
 
             container.innerHTML = drivers.map(d => {
-                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, paid: false, days: {} };
+                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, paid: false, days: {} };
                 const salary = (rec.hours || 0) * HOURLY_RATE;
                 const netDue = salary + (rec.rewards || 0) - (rec.advances || 0);
 
@@ -682,7 +674,6 @@
                     return `<tr><td><b>${day.name}</b></td><td style="color:${color}; font-weight:800;">${statusLabel}</td></tr>`;
                 }).join('');
 
-                // ملاحظات السائق في كارت الإدارة
                 const driverNotesObj = window.appState.driverNotes[d.name] || {};
                 const notesArr = Object.values(driverNotesObj);
                 const notesHtml = notesArr.length > 0 ? notesArr.map(n => `<div class="admin-note-item"><b>${n.sender}:</b> ${n.text}</div>`).join('') : '<p style="color:var(--text-sub); text-align:center;">لا توجد ملاحظات.</p>';
@@ -699,7 +690,6 @@
                             <table class="sched-table"><thead><tr><th>اليوم</th><th>الحالة</th></tr></thead><tbody>${daysTableRows}</tbody></table>
                         </div>
 
-                        <!-- صندوق ملاحظات وتنبيهات السائق -->
                         <div class="weekly-sched-container">
                             <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والإدارة</div>
                             <div class="admin-notes-box">${notesHtml}</div>
@@ -709,7 +699,10 @@
                             </div>
                         </div>
 
+                        <!-- شبكة الإحصائيات (تتضمن ساعات اليوم وساعات الأسبوع) -->
                         <div class="fin-stats-grid">
+                            <div class="fin-box"><p class="lbl">ساعات اليوم</p><p id="today_hours_${d.name.replace(/\s+/g, '_')}" class="val val-indigo">0 س</p></div>
+                            <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p id="week_hours_${d.name.replace(/\s+/g, '_')}" class="val val-amber">0 س</p></div>
                             <div class="fin-box"><p class="lbl">الأجر</p><p id="salary_${d.name.replace(/\s+/g, '_')}" class="val val-green">${Math.round(salary).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">الصافي</p><p id="net_${d.name.replace(/\s+/g, '_')}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
