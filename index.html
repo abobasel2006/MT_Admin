@@ -262,7 +262,7 @@
             if (snapshot.exists()) HOURLY_RATE = Number(snapshot.val()) || 8500;
             const rateInput = document.getElementById('hourlyRateInput');
             if (rateInput) rateInput.value = HOURLY_RATE;
-            renderWeeklyFinancialList();
+            updateLiveTimersAndSalaries();
         });
 
         function updateHourlyRate() {
@@ -312,7 +312,7 @@
 
         db.ref('weeklyRecords').on('value', (snapshot) => {
             window.appState.weeklyRecords = snapshot.val() || {};
-            renderWeeklyFinancialList();
+            updateLiveTimersAndSalaries();
         });
 
         db.ref('notes').on('value', (snapshot) => {
@@ -322,10 +322,9 @@
 
         db.ref('activeShifts').on('value', (snapshot) => {
             window.appState.activeShifts = snapshot.val() || {};
-            renderWeeklyFinancialList();
+            updateLiveTimersAndSalaries();
         });
 
-        // تصحيح دالة جلب وعرض وقت التقاط الصورة بدقة من قاعدة البيانات
         window.openOdometerImage = function(driverName, type) {
             const weekId = window.currentActiveWeek;
             const rec = window.appState.weeklyRecords[weekId] && window.appState.weeklyRecords[weekId][driverName];
@@ -587,15 +586,23 @@
 
             container.innerHTML = drivers.map(d => {
                 const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, paid: false, days: {} };
-                const totalHours = rec.hours || 0;
-                const salary = totalHours * HOURLY_RATE;
-                const netDue = salary + (rec.rewards || 0) - (rec.advances || 0);
+                const baseHours = rec.hours || 0;
 
-                let isOnDuty = false, activeCarId = null;
+                let isOnDuty = false, activeCarId = null, liveSecs = 0;
                 Object.keys(window.appState.activeShifts).forEach(carId => {
                     let val = window.appState.activeShifts[carId];
-                    if ((val?.driver || val) === d.name) { isOnDuty = true; activeCarId = carId; }
+                    if ((val?.driver || val) === d.name) {
+                        isOnDuty = true;
+                        activeCarId = carId;
+                        if (val?.timestamp) {
+                            liveSecs = Math.max(0, (Date.now() - val.timestamp) / 1000);
+                        }
+                    }
                 });
+
+                const totalHours = baseHours + (liveSecs / 3600);
+                const salary = totalHours * HOURLY_RATE;
+                const netDue = salary + (rec.rewards || 0) - (rec.advances || 0);
 
                 let daysTableRows = weekDays.map(day => {
                     const dayData = rec.days && rec.days[day.dateKey];
@@ -604,7 +611,7 @@
                     let color = 'var(--text-sub)';
 
                     if (dayData?.status === 'absent') {
-                        statusLabel = '❌ غائب'; color = 'var(--accent-red)'; timeText = '-';
+                        statusLabel = '❌ غائب'; color = 'var(--accent-red);'; timeText = '-';
                     } else if (dayData?.startTime) {
                         timeText = `${formatTime(dayData.startTime)} ➔ ${dayData.endTime ? formatTime(dayData.endTime) : 'قيد العمل'}`;
                         statusLabel = 'حاضر ✅'; color = 'var(--accent-green)';
@@ -616,7 +623,7 @@
                 const notesHtml = notesArr.length > 0 ? notesArr.map(n => `<div class="admin-note-item"><b>${n.sender}:</b> ${n.text}</div>`).join('') : '<p style="color:var(--text-sub); text-align:center;">لا توجد ملاحظات.</p>';
 
                 return `
-                    <div class="fin-row">
+                    <div class="fin-row" id="driver_row_${d.name.replace(/\s+/g, '_')}">
                         <div class="fin-row-top">
                             <div>
                                 <span class="d-name">${d.name}</span>
@@ -625,7 +632,7 @@
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
                                 ${isOnDuty ? `<button class="btn-end-shift" onclick="adminEndShift(${activeCarId}, '${d.name}')">🛑 إنهاء</button>` : ''}
-                                <span class="live-timer-badge">⏱️ ${totalHours.toFixed(1)} س</span>
+                                <span class="live-timer-badge" id="timer_badge_${d.name.replace(/\s+/g, '_')}">⏱️ ${totalHours.toFixed(1)} س</span>
                             </div>
                         </div>
 
@@ -655,11 +662,11 @@
                         </div>
 
                         <div class="fin-stats-grid">
-                            <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p class="val val-amber">${totalHours.toFixed(1)} س</p></div>
-                            <div class="fin-box"><p class="lbl">الأجر</p><p class="val val-green">${Math.round(salary).toLocaleString()} ل.س</p></div>
+                            <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p class="val val-amber" id="stat_hours_${d.name.replace(/\s+/g, '_')}">${totalHours.toFixed(1)} س</p></div>
+                            <div class="fin-box"><p class="lbl">الأجر</p><p class="val val-green" id="stat_salary_${d.name.replace(/\s+/g, '_')}">${Math.round(salary).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">المكافآت</p><p class="val val-indigo">${(rec.rewards || 0).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
-                            <div class="fin-box"><p class="lbl">الصافي</p><p class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
+                            <div class="fin-box"><p class="lbl">الصافي</p><p class="val val-amber" id="stat_net_${d.name.replace(/\s+/g, '_')}">${Math.round(netDue).toLocaleString()} ل.س</p></div>
                         </div>
 
                         <div class="pay-salary-box">
@@ -670,6 +677,47 @@
                 `;
             }).join('');
         }
+
+        // تحديث الساعات الحية والأجور ثانية بثانية دون إعادة تحميل القائمة بالكامل
+        function updateLiveTimersAndSalaries() {
+            const drivers = getAllDrivers();
+            const weekData = window.appState.weeklyRecords[window.currentActiveWeek] || {};
+
+            drivers.forEach(d => {
+                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0 };
+                const baseHours = rec.hours || 0;
+
+                let isOnDuty = false, activeCarId = null, liveSecs = 0;
+                Object.keys(window.appState.activeShifts).forEach(carId => {
+                    let val = window.appState.activeShifts[carId];
+                    if ((val?.driver || val) === d.name) {
+                        isOnDuty = true;
+                        activeCarId = carId;
+                        if (val?.timestamp) {
+                            liveSecs = Math.max(0, (Date.now() - val.timestamp) / 1000);
+                        }
+                    }
+                });
+
+                if (isOnDuty && liveSecs > 0) {
+                    const totalHours = baseHours + (liveSecs / 3600);
+                    const salary = totalHours * HOURLY_RATE;
+                    const netDue = salary + (rec.rewards || 0) - (rec.advances || 0);
+
+                    const timerBadge = document.getElementById(`timer_badge_${d.name.replace(/\s+/g, '_')}`);
+                    const statHours = document.getElementById(`stat_hours_${d.name.replace(/\s+/g, '_')}`);
+                    const statSalary = document.getElementById(`stat_salary_${d.name.replace(/\s+/g, '_')}`);
+                    const statNet = document.getElementById(`stat_net_${d.name.replace(/\s+/g, '_')}`);
+
+                    if (timerBadge) timerBadge.innerText = `⏱️ ${totalHours.toFixed(1)} س`;
+                    if (statHours) statHours.innerText = `${totalHours.toFixed(1)} س`;
+                    if (statSalary) statSalary.innerText = `${Math.round(salary).toLocaleString()} ل.س`;
+                    if (statNet) statNet.innerText = `${Math.round(netDue).toLocaleString()} ل.س`;
+                }
+            });
+        }
+
+        setInterval(updateLiveTimersAndSalaries, 1000);
 
         window.openModal = (id) => document.getElementById(id)?.classList.add('active');
         window.closeModal = (id) => document.getElementById(id)?.classList.remove('active');
