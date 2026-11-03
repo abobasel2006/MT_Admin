@@ -175,7 +175,6 @@
                     <span class="card-title">📊 مستحقات وعدادات الأسبوع للسائقين</span>
                     <button onclick="clearCurrentWeek()" style="background:transparent; border:1px solid var(--accent-amber); color:var(--accent-amber); border-radius:8px; padding:3px 8px; font-size:10px; cursor:pointer;">تصفية الأسبوع</button>
                 </div>
-                <!-- بطاقات السائقين المباشرة -->
                 <div id="driversFinancialList"></div>
             </div>
         </div>
@@ -326,7 +325,7 @@
             renderWeeklyFinancialList();
         });
 
-        // دالة فتح مودال الصور مع عرض وقت التقاطها بدقة
+        // تصحيح دالة جلب وعرض وقت التقاط الصورة بدقة من قاعدة البيانات
         window.openOdometerImage = function(driverName, type) {
             const weekId = window.currentActiveWeek;
             const rec = window.appState.weeklyRecords[weekId] && window.appState.weeklyRecords[weekId][driverName];
@@ -630,7 +629,6 @@
                             </div>
                         </div>
 
-                        <!-- أزرار عرض صور العداد مع وقت التقاطها -->
                         <div style="display:flex; gap:8px; margin-bottom:10px;">
                             <button onclick="openOdometerImage('${d.name}', 'start')" class="btn-submit" style="margin:0; background:rgba(245,158,11,0.2); color:var(--accent-amber); border:1px solid var(--accent-amber); font-size:10px; padding:6px;">📸 صورة عداد البداية</button>
                             <button onclick="openOdometerImage('${d.name}', 'end')" class="btn-submit" style="margin:0; background:rgba(99,102,241,0.2); color:var(--accent-indigo); border:1px solid var(--accent-indigo); font-size:10px; padding:6px;">📸 صورة عداد النهاية</button>
