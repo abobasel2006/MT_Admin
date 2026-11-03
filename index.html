@@ -47,10 +47,12 @@
         .form-group label { display: block; font-size: 11px; color: var(--text-sub); margin-bottom: 4px; font-weight: 600; }
         .form-control { width: 100%; background-color: #0f172a; border: 1px solid var(--border-color); color: #fff; padding: 10px; border-radius: 10px; font-size: 12px; outline: none; }
         .btn-submit { width: 100%; background-color: var(--accent-amber); color: #000; border: none; padding: 11px; border-radius: 10px; font-weight: 800; font-size: 12px; cursor: pointer; margin-top: 4px; }
+        
         .drivers-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
         .driver-subcard { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 10px; padding: 8px; display: flex; justify-content: space-between; align-items: flex-start; }
         .driver-subcard p.label-day { color: var(--accent-amber); font-weight: 800; font-size: 10px; }
         .driver-subcard p.label-night { color: var(--accent-indigo); font-weight: 800; font-size: 10px; }
+        .driver-subcard p.label-spare { color: var(--accent-green); font-weight: 800; font-size: 10px; }
         .driver-subcard p.name { font-size: 11px; font-weight: 700; color: #fff; margin-top: 2px; }
         .btn-del-sm { background: transparent; border: none; color: var(--accent-red); font-size: 12px; cursor: pointer; padding: 2px; }
         
@@ -180,7 +182,7 @@
         </div>
     </main>
 
-    <!-- مودال إضافة / تعديل سيارة -->
+    <!-- مودال إضافة / تعديل سيارة (يتضمن السائق الاحتياطي) -->
     <div id="carModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -194,6 +196,7 @@
                 <hr style="border-color: var(--border-color); margin: 10px 0;">
                 <div class="form-group"><label style="color:var(--accent-amber);">☀️ السائق النهاري</label><input type="text" id="dayDriverName" placeholder="الاسم" class="form-control" style="margin-bottom:4px;"><input type="tel" id="dayDriverPhone" placeholder="الهاتف" class="form-control"></div>
                 <div class="form-group"><label style="color:var(--accent-indigo);">🌙 السائق الليلي</label><input type="text" id="nightDriverName" placeholder="الاسم" class="form-control" style="margin-bottom:4px;"><input type="tel" id="nightDriverPhone" placeholder="الهاتف" class="form-control"></div>
+                <div class="form-group"><label style="color:var(--accent-green);">🔄 السائق الاحتياطي (المناوب)</label><input type="text" id="spareDriverName" placeholder="الاسم" class="form-control" style="margin-bottom:4px;"><input type="tel" id="spareDriverPhone" placeholder="الهاتف" class="form-control"></div>
                 <button type="submit" class="btn-submit">حفظ</button>
             </form>
         </div>
@@ -349,6 +352,34 @@
             window.appState.activeShifts = snapshot.val() || {};
             updateLiveTimersAndSalaries();
         });
+
+        // تبديل السائق الأساسي بالسائق الاحتياطي (مناوب سريع)
+        window.swapWithSpareDriver = function(carId, shiftType) {
+            const car = window.appState.cars.find(c => c.id === carId);
+            if (!car) return;
+            const spare = car.spareDriver;
+            if (!spare || !spare.name) {
+                alert("⚠️ لا يوجد سائق احتياطي مسجل لهذه السيارة.");
+                return;
+            }
+
+            let targetName = shiftType === 'day' ? car.dayDriver?.name : car.nightDriver?.name;
+            let targetPhone = shiftType === 'day' ? car.dayDriver?.phone : car.nightDriver?.phone;
+
+            if (confirm(`هل تريد استبدال السائق (${targetName || 'الشاغر'}) بالسائق الاحتياطي (${spare.name}) شفت (${shiftType === 'day' ? 'نهاري' : 'ليلي'})؟`)) {
+                if (shiftType === 'day') {
+                    car.dayDriver = { name: spare.name, phone: spare.phone };
+                } else {
+                    car.nightDriver = { name: spare.name, phone: spare.phone };
+                }
+                // تفريغ الاحتياطي أو تبديله بالقديم حسب الرغبة
+                car.spareDriver = { name: targetName || "", phone: targetPhone || "" };
+
+                db.ref('cars').set(window.appState.cars).then(() => {
+                    alert(`✅ تم تفعيل السائق الاحتياطي (${spare.name}) بنجاح!`);
+                });
+            }
+        };
 
         window.sendAdminReply = function(driverName) {
             const inputEl = document.getElementById(`reply_input_${driverName.replace(/\s+/g, '_')}`);
@@ -555,9 +586,16 @@
                         <div><button onclick="editCar(${car.id})" style="background:transparent; border:none; color:var(--text-sub); cursor:pointer;">✏️</button><button onclick="askDeleteCar(${car.id})" style="background:transparent; border:none; color:var(--accent-red); cursor:pointer; margin-right:6px;">🗑️</button></div>
                     </div>
                     <div class="drivers-grid">
-                        <div class="driver-subcard"><div><p class="label-day">☀️ نهاري</p>${car.dayDriver?.name ? `<p class="name">${car.dayDriver.name}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}</div></div>
-                        <div class="driver-subcard"><div><p class="label-night">🌙 ليلي</p>${car.nightDriver?.name ? `<p class="name">${car.nightDriver.name}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}</div></div>
+                        <div class="driver-subcard">
+                            <div><p class="label-day">☀️ نهاري</p>${car.dayDriver?.name ? `<p class="name">${car.dayDriver.name}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}</div>
+                            ${car.spareDriver?.name ? `<button onclick="swapWithSpareDriver(${car.id}, 'day')" title="تبديل بالاحتياطي" style="background:rgba(16,185,129,0.2); border:1px solid var(--accent-green); color:var(--accent-green); border-radius:4px; font-size:9px; padding:2px 5px; cursor:pointer;">🔄 تبديل</button>` : ''}
+                        </div>
+                        <div class="driver-subcard">
+                            <div><p class="label-night">🌙 ليلي</p>${car.nightDriver?.name ? `<p class="name">${car.nightDriver.name}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}</div>
+                            ${car.spareDriver?.name ? `<button onclick="swapWithSpareDriver(${car.id}, 'night')" title="تبديل بالاحتياطي" style="background:rgba(16,185,129,0.2); border:1px solid var(--accent-green); color:var(--accent-green); border-radius:4px; font-size:9px; padding:2px 5px; cursor:pointer;">🔄 تبديل</button>` : ''}
+                        </div>
                     </div>
+                    ${car.spareDriver?.name ? `<div style="margin-top:6px; background:rgba(16,185,129,0.1); border:1px dashed var(--accent-green); border-radius:8px; padding:6px; font-size:10px; display:flex; justify-content:space-between; align-items:center;"><span style="color:var(--accent-green); font-weight:bold;">🔄 الاحتياطي: ${car.spareDriver.name} (${car.spareDriver.phone || '-'})</span></div>` : ''}
                 </div>
             `).join('');
         }
@@ -570,6 +608,8 @@
             document.getElementById('dayDriverPhone').value = "";
             document.getElementById('nightDriverName').value = "";
             document.getElementById('nightDriverPhone').value = "";
+            document.getElementById('spareDriverName').value = "";
+            document.getElementById('spareDriverPhone').value = "";
             openModal('carModal');
         };
 
@@ -583,6 +623,8 @@
             document.getElementById('dayDriverPhone').value = car.dayDriver?.phone || "";
             document.getElementById('nightDriverName').value = car.nightDriver?.name || "";
             document.getElementById('nightDriverPhone').value = car.nightDriver?.phone || "";
+            document.getElementById('spareDriverName').value = car.spareDriver?.name || "";
+            document.getElementById('spareDriverPhone').value = car.spareDriver?.phone || "";
             openModal('carModal');
         };
 
@@ -594,7 +636,8 @@
                 plate: document.getElementById('carPlate').value.trim(),
                 model: document.getElementById('carModel').value.trim(),
                 dayDriver: { name: document.getElementById('dayDriverName').value.trim(), phone: document.getElementById('dayDriverPhone').value.trim() },
-                nightDriver: { name: document.getElementById('nightDriverName').value.trim(), phone: document.getElementById('nightDriverPhone').value.trim() }
+                nightDriver: { name: document.getElementById('nightDriverName').value.trim(), phone: document.getElementById('nightDriverPhone').value.trim() },
+                spareDriver: { name: document.getElementById('spareDriverName').value.trim(), phone: document.getElementById('spareDriverPhone').value.trim() }
             };
             if (editId) {
                 const idx = window.appState.cars.findIndex(c => c.id == editId);
