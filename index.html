@@ -52,21 +52,21 @@
         .driver-subcard { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 10px; padding: 8px; display: flex; justify-content: space-between; align-items: flex-start; }
         .driver-subcard p.label-day { color: var(--accent-amber); font-weight: 800; font-size: 10px; }
         .driver-subcard p.label-night { color: var(--accent-indigo); font-weight: 800; font-size: 10px; }
-        .driver-subcard p.label-spare { color: var(--accent-green); font-weight: 800; font-size: 10px; }
         .driver-subcard p.name { font-size: 11px; font-weight: 700; color: #fff; margin-top: 2px; }
-        .btn-del-sm { background: transparent; border: none; color: var(--accent-red); font-size: 12px; cursor: pointer; padding: 2px; }
-        
-        .fin-row { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 12px; padding: 10px; margin-bottom: 12px; }
-        .fin-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px; }
-        .fin-row-top .d-name { font-size: 12px; font-weight: 800; color: var(--accent-amber); }
-        .fin-row-top .d-car { font-size: 10px; color: var(--text-sub); }
+
+        /* القائمة المنسدلة للسائقين */
+        .dropdown-card { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 8px; overflow: hidden; }
+        .dropdown-header { padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; background: rgba(30, 41, 59, 0.6); }
+        .dropdown-header:hover { background: rgba(30, 41, 59, 0.9); }
+        .dropdown-body { padding: 12px; border-top: 1px solid var(--border-color); display: none; background: #0f172a; }
+        .dropdown-body.active { display: block; }
         
         .status-pill { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-right: 4px; }
         .status-on { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); }
         .status-off { background: rgba(148, 163, 184, 0.1); color: var(--text-sub); border: 1px solid var(--border-color); }
 
-        .live-timer-badge { font-family: monospace; font-size: 11px; font-weight: 800; background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.4); padding: 3px 8px; border-radius: 6px; display: inline-flex; align-items: center; gap: 4px; }
-        .btn-end-shift { background-color: var(--accent-red); color: #fff; border: none; padding: 4px 8px; border-radius: 6px; font-weight: 800; font-size: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; margin-right: 4px; }
+        .live-timer-badge { font-family: monospace; font-size: 10px; font-weight: 800; background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); border: 1px solid rgba(245, 158, 11, 0.4); padding: 2px 6px; border-radius: 6px; }
+        .btn-end-shift { background-color: var(--accent-red); color: #fff; border: none; padding: 3px 6px; border-radius: 6px; font-weight: 800; font-size: 9px; cursor: pointer; margin-right: 4px; }
 
         .fin-stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 4px; text-align: center; margin-bottom: 8px; }
         .fin-box { background-color: rgba(30, 41, 59, 0.5); padding: 6px; border-radius: 8px; }
@@ -174,15 +174,16 @@
 
             <div class="card">
                 <div class="card-header">
-                    <span class="card-title">📊 مستحقات وعدادات الأسبوع</span>
+                    <span class="card-title">📊 مستحقات وعدادات الأسبوع (قوائم السائقين)</span>
                     <button onclick="clearCurrentWeek()" style="background:transparent; border:1px solid var(--accent-amber); color:var(--accent-amber); border-radius:8px; padding:3px 8px; font-size:10px; cursor:pointer;">تصفية الأسبوع</button>
                 </div>
+                <!-- قائمة السائقين المنسدلة المرتبة -->
                 <div id="driversFinancialList"></div>
             </div>
         </div>
     </main>
 
-    <!-- مودال إضافة / تعديل سيارة (يتضمن السائق الاحتياطي) -->
+    <!-- مودال إضافة / تعديل سيارة -->
     <div id="carModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -216,6 +217,17 @@
                 <div class="form-group"><label>الحالة:</label><select id="attStatusSelect" class="form-control"><option value="present">✅ حاضر</option><option value="absent">❌ غائب</option></select></div>
                 <button type="submit" class="btn-submit" style="background-color:var(--accent-indigo); color:#fff;">تحديث الحالة</button>
             </form>
+        </div>
+    </div>
+
+    <!-- مودال عرض صور العدادات -->
+    <div id="imageModal" class="modal">
+        <div class="modal-content" style="text-align:center;">
+            <div class="modal-header">
+                <span id="modalImgTitle" style="font-weight:800; color:var(--accent-amber); font-size:13px;">صورة العداد</span>
+                <button onclick="closeModal('imageModal')" class="modal-close">✕</button>
+            </div>
+            <img id="modalOdoImg" src="" alt="لا توجد صورة مسجلة" style="width:100%; border-radius:10px; margin-top:8px; max-height:70vh; object-fit:contain;">
         </div>
     </div>
 
@@ -353,7 +365,28 @@
             updateLiveTimersAndSalaries();
         });
 
-        // تبديل السائق الأساسي بالسائق الاحتياطي (مناوب سريع)
+        window.toggleDriverDropdown = function(driverId) {
+            const bodyEl = document.getElementById(`dropdown_body_${driverId}`);
+            if (bodyEl) bodyEl.classList.toggle('active');
+        };
+
+        // فتح نافذة عرض صورة العداد (بداية أو نهاية)
+        window.openOdometerImage = function(driverName, type) {
+            const weekId = window.currentActiveWeek;
+            const rec = window.appState.weeklyRecords[weekId] && window.appState.weeklyRecords[weekId][driverName];
+            const imgBase64 = type === 'start' ? rec?.odoStartImg : rec?.odoEndImg;
+
+            document.getElementById('modalImgTitle').innerText = type === 'start' ? `صورة عداد البداية (${driverName})` : `صورة عداد النهاية (${driverName})`;
+            const imgEl = document.getElementById('modalOdoImg');
+
+            if (imgBase64) {
+                imgEl.src = imgBase64;
+                openModal('imageModal');
+            } else {
+                alert("⚠️ لم يتم رفع صورة لهذه الوردية بعد.");
+            }
+        };
+
         window.swapWithSpareDriver = function(carId, shiftType) {
             const car = window.appState.cars.find(c => c.id === carId);
             if (!car) return;
@@ -372,7 +405,6 @@
                 } else {
                     car.nightDriver = { name: spare.name, phone: spare.phone };
                 }
-                // تفريغ الاحتياطي أو تبديله بالقديم حسب الرغبة
                 car.spareDriver = { name: targetName || "", phone: targetPhone || "" };
 
                 db.ref('cars').set(window.appState.cars).then(() => {
@@ -550,7 +582,7 @@
                 if (weekHoursEl) weekHoursEl.innerText = `${totalHours.toFixed(1)} س`;
 
                 const salaryEl = document.getElementById(`salary_${d.name.replace(/\s+/g, '_')}`);
-                if (salaryEl) salaryEl.innerText = `${Math.round(liveSalary).toLocaleString()} ل.س`;
+                if (salaryEl) salaryEl.innerText = `${Math.round(salary).toLocaleString()} ل.س`;
                 const netEl = document.getElementById(`net_${d.name.replace(/\s+/g, '_')}`);
                 if (netEl) netEl.innerText = `${Math.round(netDue).toLocaleString()} ل.س`;
             });
@@ -724,8 +756,8 @@
             const weekDays = getWeekDaysList(window.currentActiveWeek);
             const todayStr = new Date().toISOString().split('T')[0];
 
-            container.innerHTML = drivers.map(d => {
-                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, paid: false, days: {} };
+            container.innerHTML = drivers.map((d, index) => {
+                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, paid: false, days: {}, odoStartImg: '', odoEndImg: '' };
                 const salary = (rec.hours || 0) * HOURLY_RATE;
                 const netDue = salary + (rec.rewards || 0) - (rec.advances || 0);
 
@@ -761,58 +793,70 @@
                 const notesHtml = notesArr.length > 0 ? notesArr.map(n => `<div class="admin-note-item"><b>${n.sender}:</b> ${n.text}</div>`).join('') : '<p style="color:var(--text-sub); text-align:center;">لا توجد ملاحظات.</p>';
 
                 return `
-                    <div class="fin-row">
-                        <div class="fin-row-top">
-                            <div>
-                                <span class="d-name">${d.name}</span>
-                                <span id="status_${d.name.replace(/\s+/g, '_')}" class="status-pill status-off">⚪ في استراحة</span>
-                                <span class="d-car">(${d.car} - ${d.shift})</span>
+                    <div class="dropdown-card">
+                        <div class="dropdown-header" onclick="toggleDriverDropdown(${index})">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:14px;">🚖</span>
+                                <div>
+                                    <span class="d-name" style="font-size:12px; font-weight:800; color:var(--accent-amber);">${d.name}</span>
+                                    <span id="status_${d.name.replace(/\s+/g, '_')}" class="status-pill status-off">⚪ في استراحة</span>
+                                    <div style="font-size:9px; color:var(--text-sub); margin-top:2px;">سيارة: ${d.car} (${d.shift})</div>
+                                </div>
                             </div>
-                            <div style="display:flex; align-items:center; gap:4px;">
-                                <button id="end_btn_${d.name.replace(/\s+/g, '_')}" class="btn-end-shift" style="display:none;">🛑 إنهاء الوردية</button>
-                                <span id="timer_${d.name.replace(/\s+/g, '_')}" class="live-timer-badge">⏱️ 00:00:00</span>
-                            </div>
-                        </div>
-
-                        <div class="weekly-sched-container">
-                            <div class="sched-title">
-                                <span>📅 جدول الحضور وأوقات العمل الأسبوعية</span>
-                                <button onclick="openAttendanceModal('${d.name}')" class="btn-edit-attendance">✏️ تعديل</button>
-                            </div>
-                            <table class="sched-table">
-                                <thead>
-                                    <tr>
-                                        <th>اليوم والتاريخ</th>
-                                        <th>وقت (البداية ➔ النهاية)</th>
-                                        <th>الحالة</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    ${daysTableRows}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div class="weekly-sched-container">
-                            <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والإدارة</div>
-                            <div class="admin-notes-box">${notesHtml}</div>
-                            <div style="display:flex; gap:6px;">
-                                <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
-                                <button onclick="sendAdminReply('${d.name}')" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <button id="end_btn_${d.name.replace(/\s+/g, '_')}" class="btn-end-shift" style="display:none;" onclick="event.stopPropagation();">🛑 إنهاء</button>
+                                <span id="timer_${d.name.replace(/\s+/g, '_')}" class="live-timer-badge">⏱️ 00:00</span>
+                                <span style="font-size:11px; color:var(--accent-amber);">▼</span>
                             </div>
                         </div>
 
-                        <div class="fin-stats-grid">
-                            <div class="fin-box"><p class="lbl">ساعات اليوم</p><p id="today_hours_${d.name.replace(/\s+/g, '_')}" class="val val-indigo">0 س</p></div>
-                            <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p id="week_hours_${d.name.replace(/\s+/g, '_')}" class="val val-amber">0 س</p></div>
-                            <div class="fin-box"><p class="lbl">الأجر</p><p id="salary_${d.name.replace(/\s+/g, '_')}" class="val val-green">${Math.round(salary).toLocaleString()} ل.س</p></div>
-                            <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
-                            <div class="fin-box"><p class="lbl">الصافي</p><p id="net_${d.name.replace(/\s+/g, '_')}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
-                        </div>
+                        <div id="dropdown_body_${index}" class="dropdown-body">
+                            <!-- أزرار عرض صور العداد للبدء والنهاية -->
+                            <div style="display:flex; gap:8px; margin-bottom:10px;">
+                                <button onclick="openOdometerImage('${d.name}', 'start')" class="btn-submit" style="margin:0; background:rgba(245,158,11,0.2); color:var(--accent-amber); border:1px solid var(--accent-amber); font-size:10px; padding:6px;">📸 صورة عداد البداية</button>
+                                <button onclick="openOdometerImage('${d.name}', 'end')" class="btn-submit" style="margin:0; background:rgba(99,102,241,0.2); color:var(--accent-indigo); border:1px solid var(--accent-indigo); font-size:10px; padding:6px;">📸 صورة عداد النهاية</button>
+                            </div>
 
-                        <div class="pay-salary-box">
-                            <span style="font-size:10px; font-weight:700; color:${rec.paid ? 'var(--accent-green)' : 'var(--text-sub)'};">${rec.paid ? '✅ تم التقبيض' : '⏳ بانتظار التقبيض'}</span>
-                            <button onclick="paySalary('${d.name}', ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">${rec.paid ? 'تم' : '💵 تقبيض الراتب'}</button>
+                            <div class="weekly-sched-container">
+                                <div class="sched-title">
+                                    <span>📅 جدول الحضور وأوقات العمل الأسبوعية</span>
+                                    <button onclick="openAttendanceModal('${d.name}')" class="btn-edit-attendance">✏️ تعديل</button>
+                                </div>
+                                <table class="sched-table">
+                                    <thead>
+                                        <tr>
+                                            <th>اليوم والتاريخ</th>
+                                            <th>وقت (البداية ➔ النهاية)</th>
+                                            <th>الحالة</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${daysTableRows}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="weekly-sched-container">
+                                <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والدردشة</div>
+                                <div class="admin-notes-box">${notesHtml}</div>
+                                <div style="display:flex; gap:6px;">
+                                    <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
+                                    <button onclick="sendAdminReply('${d.name}')" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
+                                </div>
+                            </div>
+
+                            <div class="fin-stats-grid">
+                                <div class="fin-box"><p class="lbl">ساعات اليوم</p><p id="today_hours_${d.name.replace(/\s+/g, '_')}" class="val val-indigo">0 س</p></div>
+                                <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p id="week_hours_${d.name.replace(/\s+/g, '_')}" class="val val-amber">0 س</p></div>
+                                <div class="fin-box"><p class="lbl">الأجر</p><p id="salary_${d.name.replace(/\s+/g, '_')}" class="val val-green">${Math.round(salary).toLocaleString()} ل.س</p></div>
+                                <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
+                                <div class="fin-box"><p class="lbl">الصافي</p><p id="net_${d.name.replace(/\s+/g, '_')}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
+                            </div>
+
+                            <div class="pay-salary-box">
+                                <span style="font-size:10px; font-weight:700; color:${rec.paid ? 'var(--accent-green)' : 'var(--text-sub)'};">${rec.paid ? '✅ تم التقبيض' : '⏳ بانتظار التقبيض'}</span>
+                                <button onclick="paySalary('${d.name}', ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">${rec.paid ? 'تم' : '💵 تقبيض الراتب'}</button>
+                            </div>
                         </div>
                     </div>
                 `;
