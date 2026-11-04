@@ -19,27 +19,35 @@
         .header-title h1 { font-size: 14px; color: var(--accent-amber); font-weight: 800; }
         .header-title p { font-size: 9px; color: var(--text-sub); }
         .status-badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 8px; background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); display: flex; align-items: center; gap: 4px; }
-        main { max-width: 480px; margin: 0 auto; padding: 12px 16px; }
         
-        #advanceNotificationsContainer { margin-bottom: 14px; }
-        .adv-alert-card { background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(30, 41, 59, 0.95)); border: 1px solid var(--accent-red); border-radius: 14px; padding: 12px; margin-bottom: 8px; animation: pulseAlert 2s infinite; }
-        @keyframes pulseAlert { 0% { border-color: rgba(239, 68, 68, 0.4); } 50% { border-color: rgba(239, 68, 68, 1); } 100% { border-color: rgba(239, 68, 68, 0.4); } }
-        .adv-alert-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-        .adv-alert-title { font-size: 12px; font-weight: 800; color: var(--accent-red); display: flex; align-items: center; gap: 6px; }
-        .adv-alert-amount { font-size: 13px; font-weight: 800; color: #fff; }
-        .adv-actions { display: flex; gap: 8px; }
-        .btn-approve { flex: 1; background-color: var(--accent-green); color: #000; border: none; padding: 8px; border-radius: 8px; font-weight: 800; font-size: 11px; cursor: pointer; }
-        .btn-reject { flex: 1; background-color: var(--accent-red); color: #fff; border: none; padding: 8px; border-radius: 8px; font-weight: 800; font-size: 11px; cursor: pointer; }
+        main { max-width: 900px; margin: 0 auto; padding: 16px; }
+        @media (min-width: 768px) {
+            main { max-width: 1100px; }
+            .fleet-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        }
+        
+        /* قسم الإشعارات المخصص */
+        .notifications-section { background: rgba(30, 41, 59, 0.9); border: 1px solid var(--accent-red); border-radius: 16px; padding: 14px; margin-bottom: 16px; }
+        .notifications-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid rgba(239, 68, 68, 0.3); padding-bottom: 6px; }
+        .notifications-title { font-size: 12px; font-weight: 800; color: var(--accent-red); display: flex; align-items: center; gap: 6px; }
+        .adv-alert-card { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 12px; padding: 10px; margin-bottom: 8px; }
+        .adv-alert-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .adv-actions { display: flex; gap: 8px; margin-top: 6px; }
+        .btn-approve { flex: 1; background-color: var(--accent-green); color: #000; border: none; padding: 6px; border-radius: 8px; font-weight: 800; font-size: 10px; cursor: pointer; }
+        .btn-reject { flex: 1; background-color: var(--accent-red); color: #fff; border: none; padding: 6px; border-radius: 8px; font-weight: 800; font-size: 10px; cursor: pointer; }
 
-        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
         .stat-card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 10px; text-align: center; }
         .stat-card p { font-size: 10px; color: var(--text-sub); margin-bottom: 2px; }
         .stat-card h3 { font-size: 18px; font-weight: 800; color: var(--accent-amber); }
-        .tabs-nav { display: flex; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 3px; margin-bottom: 14px; }
-        .tab-btn { flex: 1; padding: 10px 0; border: none; background: transparent; color: var(--text-sub); font-size: 12px; font-weight: 700; border-radius: 11px; cursor: pointer; }
+        
+        .tabs-nav { display: flex; background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 14px; padding: 3px; margin-bottom: 14px; gap: 4px; }
+        .tab-btn { flex: 1; padding: 10px 0; border: none; background: transparent; color: var(--text-sub); font-size: 11px; font-weight: 700; border-radius: 11px; cursor: pointer; text-align: center; }
         .tab-btn.active { background-color: var(--accent-amber); color: #000; }
+        
         .section-tab { display: none; }
         .section-tab.active { display: block; }
+        
         .card { background-color: var(--card-bg); border: 1px solid var(--border-color); border-radius: 16px; padding: 14px; margin-bottom: 12px; }
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
         .card-title { font-size: 13px; font-weight: 800; color: var(--accent-amber); }
@@ -47,6 +55,7 @@
         .form-group label { display: block; font-size: 11px; color: var(--text-sub); margin-bottom: 4px; font-weight: 600; }
         .form-control { width: 100%; background-color: #0f172a; border: 1px solid var(--border-color); color: #fff; padding: 10px; border-radius: 10px; font-size: 12px; outline: none; }
         .btn-submit { width: 100%; background-color: var(--accent-amber); color: #000; border: none; padding: 11px; border-radius: 10px; font-weight: 800; font-size: 12px; cursor: pointer; margin-top: 4px; }
+        
         .drivers-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
         .driver-subcard { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 10px; padding: 8px; display: flex; justify-content: space-between; align-items: flex-start; }
         .driver-subcard p.label-day { color: var(--accent-amber); font-weight: 800; font-size: 10px; }
@@ -55,7 +64,7 @@
         .driver-subcard p.phone { font-size: 9px; color: var(--text-sub); }
         .btn-del-sm { background: transparent; border: none; color: var(--accent-red); font-size: 12px; cursor: pointer; padding: 2px; }
         
-        .fin-row { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 12px; padding: 10px; margin-bottom: 12px; }
+        .fin-row { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
         .fin-row-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px; }
         .fin-row-top .d-name { font-size: 12px; font-weight: 800; color: var(--accent-amber); }
         .fin-row-top .d-car { font-size: 10px; color: var(--text-sub); }
@@ -82,7 +91,7 @@
             border-radius: 6px; font-weight: 800; font-size: 9px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
         }
 
-        .fin-stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 4px; text-align: center; margin-bottom: 8px; }
+        .fin-stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; text-align: center; margin-bottom: 8px; }
         .fin-box { background-color: rgba(30, 41, 59, 0.5); padding: 6px; border-radius: 8px; }
         .fin-box p.lbl { font-size: 8px; color: var(--text-sub); }
         .fin-box p.val { font-size: 10px; font-weight: 800; }
@@ -90,15 +99,19 @@
         
         .odometer-box { background: rgba(30, 41, 59, 0.8); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; font-size: 10px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
         
-        /* تنسيقات جدول الحضور والملاحظات المضافة */
         .weekly-sched-container { background: rgba(30, 41, 59, 0.7); border: 1px solid var(--border-color); border-radius: 10px; padding: 8px; margin-bottom: 8px; }
-        .sched-title { font-size: 10px; font-weight: 800; color: var(--accent-amber); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
-        .btn-edit-attendance { background: rgba(99, 102, 241, 0.2); border: 1px solid var(--accent-indigo); color: var(--accent-indigo); border-radius: 6px; padding: 2px 8px; font-size: 9px; font-weight: 700; cursor: pointer; }
-        .sched-table { width: 100%; border-collapse: collapse; font-size: 9px; text-align: center; }
-        .sched-table th { background: rgba(15, 23, 42, 0.8); color: var(--text-sub); padding: 5px; border: 1px solid var(--border-color); }
-        .sched-table td { padding: 5px; border: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.4); }
+        .dropdown-toggle-btn { width: 100%; background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: var(--accent-amber); border-radius: 8px; padding: 8px 12px; font-weight: 800; font-size: 11px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; margin-bottom: 6px; }
+        .dropdown-content-box { display: none; background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+        .dropdown-content-box.active { display: block; }
+        
+        .day-row-card { background: rgba(30, 41, 59, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-bottom: 6px; font-size: 10px; }
+        .day-row-header { display: flex; justify-content: space-between; align-items: center; font-weight: 800; margin-bottom: 4px; color: var(--text-main); }
+        .day-row-details { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; font-size: 9px; color: var(--text-sub); }
+        @media (min-width: 768px) {
+            .day-row-details { grid-template-columns: repeat(5, 1fr); }
+        }
 
-        .admin-notes-box { background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-size: 10px; max-height: 100px; overflow-y: auto; }
+        .admin-notes-box { background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px; margin-bottom: 8px; font-size: 10px; max-height: 120px; overflow-y: auto; }
         .admin-note-item { padding: 4px; border-bottom: 1px solid rgba(51, 65, 85, 0.4); }
 
         .pay-salary-box { display: flex; justify-content: space-between; align-items: center; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 8px 10px; border-radius: 8px; }
@@ -109,7 +122,7 @@
 
         .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.85); z-index: 100; align-items: center; justify-content: center; padding: 16px; }
         .modal.active { display: flex; }
-        .modal-content { background-color: var(--card-bg); border: 1px solid var(--accent-amber); border-radius: 20px; padding: 16px; width: 100%; max-width: 360px; max-height: 90vh; overflow-y: auto; }
+        .modal-content { background-color: var(--card-bg); border: 1px solid var(--accent-amber); border-radius: 20px; padding: 16px; width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .modal-close { background: transparent; border: none; color: var(--text-sub); font-size: 18px; cursor: pointer; }
     </style>
@@ -131,24 +144,44 @@
     </header>
 
     <main>
-        <div id="advanceNotificationsContainer"></div>
+        <!-- مكان مخصص لإشعارات طلبات السلف -->
+        <div id="advanceNotificationsContainer" class="notifications-section" style="display: none;">
+            <div class="notifications-header">
+                <span class="notifications-title">🔔 إشعارات طلبات السلف المالية</span>
+                <span id="advCountBadge" style="background: var(--accent-red); color: #fff; padding: 1px 6px; border-radius: 6px; font-size: 9px; font-weight: 800;">0</span>
+            </div>
+            <div id="advCardsList"></div>
+        </div>
 
         <div class="stats-grid">
             <div class="stat-card"><p>إجمالي السيارات</p><h3 id="totalCars">0</h3></div>
             <div class="stat-card"><p>إجمالي السائقين</p><h3 id="totalDrivers">0</h3></div>
         </div>
 
+        <!-- تبويبات التنقل (الأسطول، السائقين في وردية، الحسابات والعدادات) -->
         <div class="tabs-nav">
             <button id="tabFleetBtn" onclick="switchTab('fleet')" class="tab-btn active">الأسطول</button>
+            <button id="tabActiveDriversBtn" onclick="switchTab('activeDrivers')" class="tab-btn">🟢 السائقين في وردية</button>
             <button id="tabSalaryBtn" onclick="switchTab('salary')" class="tab-btn">الحسابات والعدادات</button>
         </div>
 
+        <!-- تبويب الأسطول -->
         <div id="tabFleet" class="section-tab active">
-            <div id="carsList"></div>
+            <div id="carsList" class="fleet-grid"></div>
         </div>
 
+        <!-- تبويب السائقين في وردية النشطون حالياً -->
+        <div id="tabActiveDrivers" class="section-tab">
+            <div class="card">
+                <div class="card-header"><span class="card-title">🟢 السائقون النشطون في وردية حالياً</span></div>
+                <div id="activeDriversListContainer">
+                    <p style="text-align: center; color: var(--text-sub); font-size: 11px; padding: 15px;">لا توجد ورديات نشطة حالياً.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- تبويب الحسابات والعدادات -->
         <div id="tabSalary" class="section-tab">
-            <!-- خيار تغيير أجر الساعة -->
             <div class="card" style="border-color: var(--accent-indigo);">
                 <div class="card-header" style="margin-bottom: 6px;">
                     <span class="card-title" style="color: var(--accent-indigo);">⚙️ ضبط قيمة أجر الساعة الحالية</span>
@@ -222,13 +255,13 @@
     <div id="attendanceModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <span style="font-weight:800; color:var(--accent-indigo); font-size:13px;">✏️ تعديل الحضور والغياب</span>
+                <span style="font-weight:800; color:var(--accent-indigo); font-size:13px;">✏️ تعديل الحضور والغياب اليومي</span>
                 <button onclick="closeModal('attendanceModal')" class="modal-close">✕</button>
             </div>
             <form onsubmit="saveAttendanceChange(event)">
                 <input type="hidden" id="attDriverName">
                 <div class="form-group"><label>السائق:</label><input type="text" id="attDriverNameDisplay" readonly class="form-control" style="opacity:0.7;"></div>
-                <div class="form-group"><label>اختر اليوم:</label><select id="attDateSelect" required class="form-control"></select></div>
+                <div class="form-group"><label>اختر اليوم والتاريخ:</label><select id="attDateSelect" required class="form-control"></select></div>
                 <div class="form-group"><label>الحالة:</label><select id="attStatusSelect" class="form-control"><option value="present">✅ حاضر</option><option value="absent">❌ غائب</option></select></div>
                 <button type="submit" class="btn-submit" style="background-color:var(--accent-indigo); color:#fff;">تحديث الحالة</button>
             </form>
@@ -250,9 +283,10 @@
     <div id="imageModal" class="modal">
         <div class="modal-content" style="text-align:center;">
             <div class="modal-header">
-                <span style="font-weight:800; color:var(--accent-amber); font-size:13px;">صورة العداد</span>
+                <span id="modalImgTitle" style="font-weight:800; color:var(--accent-amber); font-size:13px;">صورة العداد</span>
                 <button onclick="closeModal('imageModal')" class="modal-close">✕</button>
             </div>
+            <p id="modalImgTime" style="font-size:10px; color:var(--text-sub); margin-bottom:6px;"></p>
             <img id="modalOdoImg" src="" alt="غير متوفرة" style="width:100%; border-radius:10px; margin-top:8px;">
         </div>
     </div>
@@ -275,7 +309,6 @@
         const db = firebase.database();
         let HOURLY_RATE = 8500;
 
-        // مزامنة أجر الساعة تلقائياً من الفايربيس
         db.ref('settings/hourlyRate').on('value', (snapshot) => {
             if (snapshot.exists()) {
                 HOURLY_RATE = Number(snapshot.val()) || 8500;
@@ -323,6 +356,11 @@
             return date.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit', hour12: true });
         }
 
+        function formatDateTime(timestamp) {
+            if (!timestamp) return 'غير متوفر';
+            return new Date(timestamp).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'medium' });
+        }
+
         function getSaturdayWeekId(dateObj = new Date()) {
             const d = new Date(dateObj);
             const day = d.getDay();
@@ -333,13 +371,14 @@
 
         function getWeekDaysList(weekId) {
             const parts = weekId.split('-W_Sat_');
-            const satDate = new Date(parts[0], parts[1].split('-')[0] - 1, parts[1].split('-')[1]);
+            const satDate = new Date(parts[0], Number(parts[1].split('-')[0]) - 1, parts[1].split('-')[1]);
             const dayNames = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
             const daysArr = [];
             for (let i = 0; i < 7; i++) {
                 const d = new Date(satDate);
                 d.setDate(satDate.getDate() + i);
-                daysArr.push({ name: dayNames[i], dateKey: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` });
+                const formattedDateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                daysArr.push({ name: dayNames[i], dateKey: formattedDateStr, displayDate: `${d.getDate()} / ${d.getMonth()+1} / ${d.getFullYear()}` });
             }
             return daysArr;
         }
@@ -406,6 +445,7 @@
             window.appState.activeShifts = rawShifts;
             localStorage.setItem('mt_admin_shifts', JSON.stringify(rawShifts));
             updateLiveTimersAndSalaries();
+            renderActiveDriversTab();
         });
 
         window.adminEndShift = function(carId, driverName) {
@@ -424,7 +464,7 @@
 
                 if (!window.appState.weeklyRecords[weekId]) window.appState.weeklyRecords[weekId] = {};
                 if (!window.appState.weeklyRecords[weekId][driverName]) {
-                    window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0, todayHours: 0 };
+                    window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0, todayHours: 0, days: {} };
                 }
 
                 const driverRec = window.appState.weeklyRecords[weekId][driverName];
@@ -432,6 +472,12 @@
                 driverRec.todayHours = (driverRec.todayHours || 0) + elapsedHours;
                 driverRec.lastShiftStart = startTime;
                 driverRec.lastShiftEnd = endTime;
+
+                const dateKey = new Date().toISOString().split('T')[0];
+                if (!driverRec.days) driverRec.days = {};
+                if (!driverRec.days[dateKey]) driverRec.days[dateKey] = {};
+                driverRec.days[dateKey].endTime = endTime;
+                driverRec.days[dateKey].status = 'present';
 
                 const updates = {};
                 updates[`activeShifts/${carId}`] = null;
@@ -497,7 +543,7 @@
             document.getElementById('attDriverName').value = driverName;
             document.getElementById('attDriverNameDisplay').value = driverName;
             const weekDays = getWeekDaysList(window.currentActiveWeek);
-            document.getElementById('attDateSelect').innerHTML = weekDays.map(d => `<option value="${d.dateKey}">${d.name} (${d.dateKey})</option>`).join('');
+            document.getElementById('attDateSelect').innerHTML = weekDays.map(d => `<option value="${d.dateKey}">${d.name} (${d.displayDate})</option>`).join('');
             openModal('attendanceModal');
         };
 
@@ -524,31 +570,87 @@
             });
         };
 
+        window.toggleDropdown = function(id) {
+            const box = document.getElementById(id);
+            if (box) {
+                box.classList.toggle('active');
+            }
+        };
+
+        // عرض إشعارات السلف في المكان المخصص
         function renderAdvanceNotifications() {
             const container = document.getElementById('advanceNotificationsContainer');
-            if (!container) return;
+            const listEl = document.getElementById('advCardsList');
+            const countBadge = document.getElementById('advCountBadge');
+            if (!container || !listEl) return;
+            
             const weekId = window.currentActiveWeek;
             const pendings = (window.appState.pendingAdvances && window.appState.pendingAdvances[weekId]) ? window.appState.pendingAdvances[weekId] : {};
             const drivers = Object.keys(pendings);
 
             if (drivers.length === 0) {
-                container.innerHTML = '';
+                container.style.display = 'none';
+                listEl.innerHTML = '';
                 return;
             }
 
-            container.innerHTML = drivers.map(drv => {
+            container.style.display = 'block';
+            countBadge.innerText = drivers.length;
+
+            listEl.innerHTML = drivers.map(drv => {
                 const req = pendings[drv];
                 return `
                     <div class="adv-alert-card">
                         <div class="adv-alert-top">
-                            <span class="adv-alert-title">🔔 طلب سلفة جديدة</span>
-                            <span class="adv-alert-amount">${req.amount.toLocaleString()} ل.س</span>
+                            <span style="font-size:11px; font-weight:800; color:var(--accent-red);">السائق: ${drv}</span>
+                            <span style="font-size:12px; font-weight:800; color:#fff;">${req.amount.toLocaleString()} ل.س</span>
                         </div>
-                        <p style="font-size:11px; margin-bottom:8px; color:var(--text-main);">السائق: <b>${drv}</b> يطلب سلفة أسبوعية.</p>
+                        <p style="font-size:10px; margin-bottom:6px; color:var(--text-sub);">يطلب سلفة مالية أسبوعية.</p>
                         <div class="adv-actions">
                             <button onclick="approveAdvance('${drv}', ${req.amount})" class="btn-approve">✅ موافقة واعتماد</button>
                             <button onclick="rejectAdvance('${drv}')" class="btn-reject">❌ رفض</button>
                         </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // عرض تبويب السائقين النشطين في وردية
+        function renderActiveDriversTab() {
+            const container = document.getElementById('activeDriversListContainer');
+            if (!container) return;
+
+            const activeShifts = window.appState.activeShifts || {};
+            const activeCarIds = Object.keys(activeShifts);
+
+            if (activeCarIds.length === 0) {
+                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); font-size: 11px; padding: 15px;">لا توجد ورديات نشطة حالياً.</p>`;
+                return;
+            }
+
+            container.innerHTML = activeCarIds.map(carId => {
+                const shift = activeShifts[carId];
+                if (!shift) return '';
+                const startTime = shift.timestamp || Date.now();
+                const elapsedSecs = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+                const h = Math.floor(elapsedSecs / 3600);
+                const m = Math.floor((elapsedSecs % 3600) / 60);
+                const s = elapsedSecs % 60;
+
+                return `
+                    <div class="fin-row" style="margin-bottom: 8px;">
+                        <div class="fin-row-top">
+                            <div>
+                                <span class="d-name">${shift.driver}</span>
+                                <span class="status-pill status-on">🟢 في وردية نشطة</span>
+                                <span class="d-car">(سيارة: ${shift.car})</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span class="live-timer-badge">⏱️ ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}</span>
+                                <button class="btn-end-shift" onclick="adminEndShift(${carId}, '${shift.driver}')">🛑 إنهاء الوردية</button>
+                            </div>
+                        </div>
+                        <p style="font-size: 10px; color: var(--text-sub);">وقت البدء: ${formatDateTime(startTime)}</p>
                     </div>
                 `;
             }).join('');
@@ -659,17 +761,18 @@
             renderWeekSelector();
             renderWeeklyFinancialList();
             renderAdvanceNotifications();
+            renderActiveDriversTab();
         }
 
         function renderFleet() {
             const container = document.getElementById('carsList');
             if (!container) return;
             if (window.appState.cars.length === 0) {
-                container.innerHTML = `<div class="card" style="text-align:center; color:var(--text-sub); font-size:11px;">لا توجد سيارات بالأسطول.</div>`;
+                container.innerHTML = `<div class="card" style="text-align:center; color:var(--text-sub); font-size:11px; grid-column: span 2;">لا توجد سيارات بالأسطول.</div>`;
                 return;
             }
             container.innerHTML = window.appState.cars.map(car => `
-                <div class="card">
+                <div class="card" style="margin-bottom:0;">
                     <div class="card-header">
                         <div>
                             <span style="background:rgba(245,158,11,0.2); color:var(--accent-amber); font-weight:800; font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid rgba(245,158,11,0.3);">${car.plate}</span>
@@ -797,7 +900,7 @@
             const weekId = getSaturdayWeekId();
             if (!window.appState.weeklyRecords[weekId]) window.appState.weeklyRecords[weekId] = {};
             if (!window.appState.weeklyRecords[weekId][driverName]) {
-                window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '' };
+                window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '', days: {} };
             }
 
             if (actionType === 'hours') {
@@ -868,32 +971,48 @@
                 const initialSalary = (rec.hours || 0) * HOURLY_RATE;
                 const rewards = rec.rewards || 0;
                 const netDue = initialSalary + rewards - (rec.advances || 0);
-                const distance = (rec.odoEnd && rec.odoStart && rec.odoEnd > rec.odoStart) ? (rec.odoEnd - rec.odoStart) : 0;
                 
                 const timerId = `timer_${d.name.replace(/\s+/g, '_')}`;
                 const statusId = `status_${d.name.replace(/\s+/g, '_')}`;
                 const endBtnId = `end_btn_${d.name.replace(/\s+/g, '_')}`;
                 const salaryId = `salary_${d.name.replace(/\s+/g, '_')}`;
-                const rewardsId = `rewards_${d.name.replace(/\s+/g, '_')}`;
                 const netId = `net_${d.name.replace(/\s+/g, '_')}`;
                 const todayHoursId = `today_hours_${d.name.replace(/\s+/g, '_')}`;
                 const weekHoursId = `week_hours_${d.name.replace(/\s+/g, '_')}`;
                 const startTimeId = `start_time_${d.name.replace(/\s+/g, '_')}`;
                 const endTimeId = `end_time_${d.name.replace(/\s+/g, '_')}`;
+                const dropdownId = `dropdown_days_${d.name.replace(/\s+/g, '_')}`;
 
-                let daysTableRows = weekDays.map(day => {
+                let daysRowsHtml = weekDays.map(day => {
                     const dayData = rec.days && rec.days[day.dateKey];
-                    let timeText = '--:--';
+                    let startT = dayData?.startTime ? formatTime(dayData.startTime) : '--:--';
+                    let endT = dayData?.endTime ? formatTime(dayData.endTime) : (dayData?.startTime ? 'قيد العمل' : '--:--');
+                    let dayHours = dayData?.startTime && dayData?.endTime ? ((dayData.endTime - dayData.startTime) / 3600000).toFixed(1) + ' س' : '0 س';
+                    
                     let statusLabel = day.dateKey < todayStr ? '❌ غياب' : (day.dateKey === todayStr ? '⏳ اليوم' : '⏳ قادم');
-                    let color = 'var(--text-sub)';
+                    let statusColor = 'var(--text-sub)';
 
                     if (dayData?.status === 'absent') {
-                        statusLabel = '❌ غائب'; color = 'var(--accent-red)'; timeText = '-';
-                    } else if (dayData?.startTime) {
-                        timeText = `${formatTime(dayData.startTime)} ➔ ${dayData.endTime ? formatTime(dayData.endTime) : 'قيد العمل'}`;
-                        statusLabel = 'حاضر ✅'; color = 'var(--accent-green)';
+                        statusLabel = '❌ غائب'; statusColor = 'var(--accent-red)';
+                    } else if (dayData?.status === 'present' || dayData?.startTime) {
+                        statusLabel = '✅ حاضر'; statusColor = 'var(--accent-green)';
                     }
-                    return `<tr><td><b>${day.name}</b></td><td>${timeText}</td><td style="color:${color}; font-weight:800;">${statusLabel}</td></tr>`;
+
+                    return `
+                        <div class="day-row-card">
+                            <div class="day-row-header">
+                                <span>📅 ${day.name} (${day.displayDate})</span>
+                                <span style="color:${statusColor};">${statusLabel}</span>
+                            </div>
+                            <div class="day-row-details">
+                                <div>بدء: <b>${startT}</b></div>
+                                <div>انتهاء: <b>${endT}</b></div>
+                                <div>ساعات اليوم: <b style="color:var(--accent-amber);">${dayHours}</b></div>
+                                <div>عداد البداية: ${rec.odoStartImg ? `<button onclick="showImage('${rec.odoStartImg}', 'صورة عداد البداية (${day.name})', '${formatDateTime(rec.odoStartTimestamp)}') " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد النهاية: ${rec.odoEndImg ? `<button onclick="showImage('${rec.odoEndImg}', 'صورة عداد النهاية (${day.name})', '${formatDateTime(rec.odoEndTimestamp)}') " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                            </div>
+                        </div>
+                    `;
                 }).join('');
 
                 const notesArr = Object.values(window.appState.driverNotes[d.name] || {});
@@ -918,23 +1037,20 @@
                             <span>🔴 إنهاء الوردية: <b id="${endTimeId}">--:--</b></span>
                         </div>
 
-                        <!-- جدول الدوام وأوقات العمل الأسبوعية المضاف -->
                         <div class="weekly-sched-container">
-                            <div class="sched-title">
-                                <span>📅 جدول الحضور وأوقات العمل الأسبوعية</span>
-                                <button onclick="openAttendanceModal('${d.name}')" class="btn-edit-attendance">✏️ تعديل</button>
+                            <button onclick="toggleDropdown('${dropdownId}')" class="dropdown-toggle-btn">
+                                <span>📅 جدول الدوام والحضور الأسبوعي (اضغط للعرض/الإخفاء)</span>
+                                <span style="font-size:10px; color:var(--accent-indigo);" onclick="event.stopPropagation(); openAttendanceModal('${d.name}')">✏️ تعديل الحضور</span>
+                            </button>
+                            <div id="${dropdownId}" class="dropdown-content-box">
+                                ${daysRowsHtml}
                             </div>
-                            <table class="sched-table">
-                                <thead><tr><th>اليوم والتاريخ</th><th>الوقت</th><th>الحالة</th></tr></thead>
-                                <tbody>${daysTableRows}</tbody>
-                            </table>
                         </div>
 
-                        <!-- قسم الملاحظات والدردشة مع السائق المضاف -->
                         <div class="weekly-sched-container">
                             <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والدردشة</div>
                             <div class="admin-notes-box">${notesHtml}</div>
-                            <div style="display:flex; gap:6px;">
+                            <div style="display:flex; gap:6px; margin-top:4px;">
                                 <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
                                 <button onclick="sendAdminReply('${d.name}')" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
                             </div>
@@ -946,16 +1062,6 @@
                             <div class="fin-box"><p class="lbl">الأجر</p><p id="${salaryId}" class="val val-green">${Math.round(initialSalary).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">الصافي</p><p id="${netId}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
-                        </div>
-                        <div class="odometer-box">
-                            <div>
-                                <span>بداية: <b>${rec.odoStart || 0}</b></span> | <span>نهاية: <b>${rec.odoEnd || 0}</b></span>
-                                <br><span style="color:var(--accent-green); font-weight:bold;">المسافة: ${distance} كم</span>
-                            </div>
-                            <div style="display:flex; gap:4px; align-items:center;">
-                                ${rec.odoStartImg ? `<button onclick="showImage('${rec.odoStartImg}')" style="background:var(--accent-amber); color:#000; border:none; padding:4px 8px; border-radius:4px; font-size:9px; font-weight:bold; cursor:pointer;">📷 صورة البداية</button>` : '<span style="font-size:9px; color:var(--text-sub);">لا توجد صورة بداية</span>'}
-                                ${rec.odoEndImg ? `<button onclick="showImage('${rec.odoEndImg}')" style="background:var(--accent-amber); color:#000; border:none; padding:4px 8px; border-radius:4px; font-size:9px; font-weight:bold; cursor:pointer;">📷 صورة النهاية</button>` : '<span style="font-size:9px; color:var(--text-sub);">لا توجد صورة نهاية</span>'}
-                            </div>
                         </div>
                         <div class="pay-salary-box">
                             <div>
@@ -974,7 +1080,9 @@
             updateLiveTimersAndSalaries();
         }
 
-        window.showImage = function(base64Str) {
+        window.showImage = function(base64Str, titleText, timeText) {
+            document.getElementById('modalImgTitle').innerText = titleText;
+            document.getElementById('modalImgTime').innerText = `🕒 وقت الالتقاط: ${timeText}`;
             const imgEl = document.getElementById('modalOdoImg');
             if (imgEl) imgEl.src = base64Str;
             openModal('imageModal');
@@ -988,22 +1096,32 @@
             const modal = document.getElementById(id);
             if (modal) modal.classList.remove('active');
         }
+
         window.switchTab = function(tab) {
             const tabFleet = document.getElementById('tabFleet');
+            const tabActiveDrivers = document.getElementById('tabActiveDrivers');
             const tabSalary = document.getElementById('tabSalary');
+            
             const tabFleetBtn = document.getElementById('tabFleetBtn');
+            const tabActiveDriversBtn = document.getElementById('tabActiveDriversBtn');
             const tabSalaryBtn = document.getElementById('tabSalaryBtn');
 
-            if (!tabFleet || !tabSalary || !tabFleetBtn || !tabSalaryBtn) return;
+            if (!tabFleet || !tabActiveDrivers || !tabSalary) return;
 
             tabFleet.classList.remove('active');
+            tabActiveDrivers.classList.remove('active');
             tabSalary.classList.remove('active');
+            
             tabFleetBtn.classList.remove('active');
+            tabActiveDriversBtn.classList.remove('active');
             tabSalaryBtn.classList.remove('active');
 
             if (tab === 'fleet') {
                 tabFleet.classList.add('active');
                 tabFleetBtn.classList.add('active');
+            } else if (tab === 'activeDrivers') {
+                tabActiveDrivers.classList.add('active');
+                tabActiveDriversBtn.classList.add('active');
             } else {
                 tabSalary.classList.add('active');
                 tabSalaryBtn.classList.add('active');
