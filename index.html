@@ -61,6 +61,9 @@
         .driver-subcard p.label-night { color: var(--accent-indigo); font-weight: 800; font-size: 10px; }
         .driver-subcard p.name { font-size: 11px; font-weight: 700; color: #fff; margin-top: 2px; }
         .driver-subcard p.phone { font-size: 9px; color: var(--text-sub); }
+        
+        .driver-actions-group { display: flex; gap: 4px; align-items: center; }
+        .btn-transfer-sm { background: rgba(99, 102, 241, 0.2); border: 1px solid var(--accent-indigo); color: var(--accent-indigo); font-size: 9px; font-weight: bold; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
         .btn-del-sm { background: transparent; border: none; color: var(--accent-red); font-size: 12px; cursor: pointer; padding: 2px; }
         
         .fin-row { background-color: #0f172a; border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
@@ -141,7 +144,6 @@
     </header>
 
     <main>
-        <!-- مكان مخصص لإشعارات طلبات السلف -->
         <div id="advanceNotificationsContainer" class="notifications-section" style="display: none;">
             <div class="notifications-header">
                 <span class="notifications-title">🔔 إشعارات طلبات السلف المالية</span>
@@ -155,19 +157,16 @@
             <div class="stat-card"><p>إجمالي السائقين</p><h3 id="totalDrivers">0</h3></div>
         </div>
 
-        <!-- تبويبات التنقل -->
         <div class="tabs-nav">
             <button id="tabFleetBtn" onclick="switchTab('fleet')" class="tab-btn active">الأسطول</button>
             <button id="tabActiveDriversBtn" onclick="switchTab('activeDrivers')" class="tab-btn">🟢 السائقين في وردية</button>
             <button id="tabSalaryBtn" onclick="switchTab('salary')" class="tab-btn">الحسابات والعدادات</button>
         </div>
 
-        <!-- تبويب الأسطول -->
         <div id="tabFleet" class="section-tab active">
             <div id="carsList" class="fleet-grid"></div>
         </div>
 
-        <!-- تبويب السائقين في وردية النشطون حالياً -->
         <div id="tabActiveDrivers" class="section-tab">
             <div class="card">
                 <div class="card-header"><span class="card-title">🟢 السائقون النشطون في وردية حالياً</span></div>
@@ -177,7 +176,6 @@
             </div>
         </div>
 
-        <!-- تبويب الحسابات والعدادات -->
         <div id="tabSalary" class="section-tab">
             <div class="card" style="border-color: var(--accent-indigo);">
                 <div class="card-header" style="margin-bottom: 6px;">
@@ -231,6 +229,7 @@
         </div>
     </main>
 
+    <!-- مودال إضافة/تعديل سيارة -->
     <div id="carModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -249,7 +248,38 @@
         </div>
     </div>
 
-    <!-- مودال تعديل الحضور والغياب -->
+    <!-- مودال نقل السائق الأمان (يحافظ على كامل سجلاته وساعات عمله) -->
+    <div id="transferDriverModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span style="font-weight:800; color:var(--accent-indigo); font-size:13px;">🔄 نقل السائق إلى سيارة جديدة</span>
+                <button onclick="closeModal('transferDriverModal')" class="modal-close">✕</button>
+            </div>
+            <form onsubmit="executeDriverTransfer(event)">
+                <input type="hidden" id="transDriverName">
+                <input type="hidden" id="transOldCarId">
+                <input type="hidden" id="transShiftType">
+                
+                <div class="form-group">
+                    <label>السائق المراد نقله:</label>
+                    <input type="text" id="transDriverDisplay" readonly class="form-control" style="opacity:0.7;">
+                </div>
+                <div class="form-group">
+                    <label>اختر السيارة المستهدفة (الجديدة):</label>
+                    <select id="transTargetCarSelect" required class="form-control"></select>
+                </div>
+                <div class="form-group">
+                    <label>اختر الشفت في السيارة الجديدة:</label>
+                    <select id="transTargetShiftSelect" class="form-control">
+                        <option value="day">☀️ نهاري</option>
+                        <option value="night">🌙 ليلي</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-submit" style="background-color: var(--accent-indigo); color:#fff;">إتمام النقل بأمان</button>
+            </form>
+        </div>
+    </div>
+
     <div id="attendanceModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -444,7 +474,7 @@
             localStorage.setItem('mt_admin_shifts', JSON.stringify(rawShifts));
             updateLiveTimersAndSalaries();
             renderActiveDriversTab();
-            renderWeeklyFinancialList(); // تحديث أوقات البدء الفورية في البطاقات
+            renderWeeklyFinancialList();
         });
 
         window.adminEndShift = function(carId, driverName) {
@@ -574,6 +604,62 @@
             if (box) {
                 box.classList.toggle('active');
             }
+        };
+
+        // دالة فتح نافذة النقل الآمن للسائق
+        window.openTransferDriverModal = function(carId, driverName, shiftType) {
+            document.getElementById('transDriverName').value = driverName;
+            document.getElementById('transOldCarId').value = carId;
+            document.getElementById('transShiftType').value = shiftType;
+            document.getElementById('transDriverDisplay').value = `${driverName} (${shiftType === 'day' ? 'نهاري' : 'ليلي'})`;
+
+            const targetSelect = document.getElementById('transTargetCarSelect');
+            targetSelect.innerHTML = window.appState.cars.map(c => `
+                <option value="${c.id}">سيارة: ${c.plate} - ${c.model}</option>
+            `).join('');
+
+            openModal('transferDriverModal');
+        };
+
+        // تنفيذ عملية النقل مع الاحتفاظ بكافة البيانات وساعات العمل وسجلات السائق
+        window.executeDriverTransfer = function(e) {
+            e.preventDefault();
+            const driverName = document.getElementById('transDriverName').value;
+            const oldCarId = Number(document.getElementById('transOldCarId').value);
+            const oldShiftType = document.getElementById('transShiftType').value;
+            const targetCarId = Number(document.getElementById('transTargetCarSelect').value);
+            const targetShiftType = document.getElementById('transTargetShiftSelect').value;
+
+            // إيجاد السيارة القديمة والسيارة الجديدة
+            const oldCar = window.appState.cars.find(c => c.id === oldCarId);
+            const targetCar = window.appState.cars.find(c => c.id === targetCarId);
+
+            if (!oldCar || !targetCar) {
+                alert("خطأ في تحديد السيارات.");
+                return;
+            }
+
+            // التحقق مما إذا كان الشفت المستهدف في السيارة الجديدة شاغراً
+            let targetPhone = "";
+            if (oldShiftType === 'day' && oldCar.dayDriver?.name === driverName) {
+                targetPhone = oldCar.dayDriver.phone || "";
+                oldCar.dayDriver = { name: "", phone: "" };
+            } else if (oldShiftType === 'night' && oldCar.nightDriver?.name === driverName) {
+                targetPhone = oldCar.nightDriver.phone || "";
+                oldCar.nightDriver = { name: "", phone: "" };
+            }
+
+            if (targetShiftType === 'day') {
+                targetCar.dayDriver = { name: driverName, phone: targetPhone };
+            } else {
+                targetCar.nightDriver = { name: driverName, phone: targetPhone };
+            }
+
+            // تحديث جدول السيارات في قاعدة البيانات دون مسح السجلات المالية وساعات العمل
+            db.ref('cars').set(window.appState.cars).then(() => {
+                closeModal('transferDriverModal');
+                alert(`✅ تم نقل السائق (${driverName}) بنجاح إلى السيارة الجديدة مع الاحتفاظ بكافة بياناته ورصيده وساعاته!`);
+            });
         };
 
         function renderAdvanceNotifications() {
@@ -737,7 +823,6 @@
                     } else if (rec.lastShiftStart) {
                         st = rec.lastShiftStart;
                     } else {
-                        // التحقق من تاريخ اليوم داخل الأيام المسجلة إذا وجد
                         const todayKey = new Date().toISOString().split('T')[0];
                         if (rec.days && rec.days[todayKey] && rec.days[todayKey].startTime) {
                             st = rec.days[todayKey].startTime;
@@ -787,6 +872,7 @@
             renderActiveDriversTab();
         }
 
+        // عرض الأسطول مع زر نقل السائق الآمن بجانب كل سائق
         function renderFleet() {
             const container = document.getElementById('carsList');
             if (!container) return;
@@ -812,14 +898,20 @@
                                 <p class="label-day">☀️ نهاري</p>
                                 ${car.dayDriver?.name ? `<p class="name">${car.dayDriver.name}</p><p class="phone">${car.dayDriver.phone || '-'}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
                             </div>
-                            ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'day')" class="btn-del-sm">✕</button>` : ''}
+                            <div class="driver-actions-group">
+                                ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${car.id}, '${car.dayDriver.name}', 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'day')" class="btn-del-sm">✕</button>` : ''}
+                            </div>
                         </div>
                         <div class="driver-subcard">
                             <div>
                                 <p class="label-night">🌙 ليلي</p>
                                 ${car.nightDriver?.name ? `<p class="name">${car.nightDriver.name}</p><p class="phone">${car.nightDriver.phone || '-'}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
                             </div>
-                            ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'night')" class="btn-del-sm">✕</button>` : ''}
+                            <div class="driver-actions-group">
+                                ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${car.id}, '${car.nightDriver.name}', 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'night')" class="btn-del-sm">✕</button>` : ''}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1121,7 +1213,6 @@
         }
         window.closeModal = function(id) {
             const modal = document.getElementById(id);
-            if (modal) modal.classList.add('active'); // تم إصلاح إغلاق المودال
             if (modal) modal.classList.remove('active');
         }
 
