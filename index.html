@@ -179,7 +179,6 @@
 
         <!-- تبويب الحسابات والعدادات -->
         <div id="tabSalary" class="section-tab">
-            <!-- أجر الساعة الافتراضي العام -->
             <div class="card" style="border-color: var(--accent-indigo);">
                 <div class="card-header" style="margin-bottom: 6px;">
                     <span class="card-title" style="color: var(--accent-indigo);">⚙️ ضبط أجر الساعة الافتراضي العام</span>
@@ -197,9 +196,8 @@
                 </div>
             </div>
 
-            <!-- العمليات على السائقين (تعديل الساعات، السلف، أجر الساعة المخصص) -->
             <div class="card">
-                <div class="card-header"><span class="card-title">⏱️ العمليات على السائقين (ساعات، سلف، وتعديل أجر الساعة الخاص)</span></div>
+                <div class="card-header"><span class="card-title">⏱️ العمليات على السائقين (ساعات، سلف، وأجر الساعة الخاص)</span></div>
                 <form onsubmit="adminAddTransaction(event)">
                     <div class="form-group">
                         <label>اختر السائق</label>
@@ -446,6 +444,7 @@
             localStorage.setItem('mt_admin_shifts', JSON.stringify(rawShifts));
             updateLiveTimersAndSalaries();
             renderActiveDriversTab();
+            renderWeeklyFinancialList(); // تحديث أوقات البدء الفورية في البطاقات
         });
 
         window.adminEndShift = function(carId, driverName) {
@@ -695,7 +694,6 @@
                 const m = Math.floor((totalSecs % 3600) / 60);
                 const s = totalSecs % 60;
 
-                // استخدام أجر السائق الخاص إذا كان محدد، وإلا السعر العام
                 const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
                 const liveSalary = totalHours * driverRate;
                 const rewards = rec.rewards || 0;
@@ -733,11 +731,36 @@
                 if (weekHoursEl) weekHoursEl.innerText = `${totalHours.toFixed(1)} س`;
 
                 if (startTimeEl) {
-                    let st = isOnDuty ? shiftStartTime : (rec.lastShiftStart || null);
+                    let st = null;
+                    if (isOnDuty && shiftStartTime) {
+                        st = shiftStartTime;
+                    } else if (rec.lastShiftStart) {
+                        st = rec.lastShiftStart;
+                    } else {
+                        // التحقق من تاريخ اليوم داخل الأيام المسجلة إذا وجد
+                        const todayKey = new Date().toISOString().split('T')[0];
+                        if (rec.days && rec.days[todayKey] && rec.days[todayKey].startTime) {
+                            st = rec.days[todayKey].startTime;
+                        }
+                    }
                     startTimeEl.innerText = st ? formatTime(st) : '--:--';
                 }
+
                 if (endTimeEl) {
-                    endTimeEl.innerText = isOnDuty ? 'قيد العمل' : (rec.lastShiftEnd ? formatTime(rec.lastShiftEnd) : '--:--');
+                    let et = null;
+                    if (isOnDuty) {
+                        et = 'قيد العمل';
+                    } else if (rec.lastShiftEnd) {
+                        et = formatTime(rec.lastShiftEnd);
+                    } else {
+                        const todayKey = new Date().toISOString().split('T')[0];
+                        if (rec.days && rec.days[todayKey] && rec.days[todayKey].endTime) {
+                            et = formatTime(rec.days[todayKey].endTime);
+                        } else {
+                            et = '--:--';
+                        }
+                    }
+                    endTimeEl.innerText = et;
                 }
             });
         }
@@ -990,7 +1013,7 @@
                     const dayData = rec.days && rec.days[day.dateKey];
                     let startT = dayData?.startTime ? formatTime(dayData.startTime) : '--:--';
                     let endT = dayData?.endTime ? formatTime(dayData.endTime) : (dayData?.startTime ? 'قيد العمل' : '--:--');
-                    let dayHours = dayData?.startTime && dayData?.endTime ? ((dayData.endTime - dayData.startTime) / 3600000).toFixed(1) + ' س' : '0 س';
+                    let dayHours = dayData?.startTime && dayData?.endTime ? ((dayData.endTime - dayData.startTime) / 3600000).toFixed(1) + ' س' : (dayData?.startTime ? 'قيد العمل' : '0 س');
                     
                     let statusLabel = day.dateKey < todayStr ? '❌ غياب' : (day.dateKey === todayStr ? '⏳ اليوم' : '⏳ قادم');
                     let statusColor = 'var(--text-sub)';
@@ -1011,8 +1034,8 @@
                                 <div>بدء: <b>${startT}</b></div>
                                 <div>انتهاء: <b>${endT}</b></div>
                                 <div>ساعات اليوم: <b style="color:var(--accent-amber);">${dayHours}</b></div>
-                                <div>عداد البداية: ${rec.odoStartImg ? `<button onclick="showImage('${rec.odoStartImg}', 'صورة عداد البداية (${day.name})', '${formatDateTime(rec.odoStartTimestamp)}') " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
-                                <div>عداد النهاية: ${rec.odoEndImg ? `<button onclick="showImage('${rec.odoEndImg}', 'صورة عداد النهاية (${day.name})', '${formatDateTime(rec.odoEndTimestamp)}') " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد البداية: ${dayData?.odoStartImg || rec.odoStartImg ? `<button onclick="showImage('${dayData?.odoStartImg || rec.odoStartImg}', 'صورة عداد البداية (${day.name})', '${formatDateTime(dayData?.startTime || rec.odoStartTimestamp)}') " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد النهاية: ${dayData?.odoEndImg || rec.odoEndImg ? `<button onclick="showImage('${dayData?.odoEndImg || rec.odoEndImg}', 'صورة عداد النهاية (${day.name})', '${formatDateTime(dayData?.endTime || rec.odoEndTimestamp)}') " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
                             </div>
                         </div>
                     `;
@@ -1098,6 +1121,7 @@
         }
         window.closeModal = function(id) {
             const modal = document.getElementById(id);
+            if (modal) modal.classList.add('active'); // تم إصلاح إغلاق المودال
             if (modal) modal.classList.remove('active');
         }
 
