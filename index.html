@@ -248,7 +248,7 @@
         </div>
     </div>
 
-    <!-- مودال نقل السائق الأمان (يحافظ على كامل سجلاته وساعات عمله) -->
+    <!-- مودال نقل السائق -->
     <div id="transferDriverModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -280,6 +280,7 @@
         </div>
     </div>
 
+    <!-- مودال تعديل الحضور والغياب (المصحح) -->
     <div id="attendanceModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
@@ -291,7 +292,7 @@
                 <div class="form-group"><label>السائق:</label><input type="text" id="attDriverNameDisplay" readonly class="form-control" style="opacity:0.7;"></div>
                 <div class="form-group"><label>اختر اليوم والتاريخ:</label><select id="attDateSelect" required class="form-control"></select></div>
                 <div class="form-group"><label>الحالة:</label><select id="attStatusSelect" class="form-control"><option value="present">✅ حاضر</option><option value="absent">❌ غائب</option></select></div>
-                <button type="submit" class="btn-submit" style="background-color:var(--accent-indigo); color:#fff;">تحديث الحالة</button>
+                <button type="submit" class="btn-submit" style="background-color:var(--accent-indigo); color:#fff;">تحديث الحالة وحفظ</button>
             </form>
         </div>
     </div>
@@ -576,15 +577,26 @@
             openModal('attendanceModal');
         };
 
+        // دالة حفظ التعديل اليدوي على الحضور والغياب (تم إصلاحها وتحديثها)
         window.saveAttendanceChange = function(e) {
             e.preventDefault();
             const driverName = document.getElementById('attDriverName').value;
             const dateKey = document.getElementById('attDateSelect').value;
             const status = document.getElementById('attStatusSelect').value;
             const weekId = window.currentActiveWeek;
-            db.ref().update({[`weeklyRecords/${weekId}/${driverName}/days/${dateKey}/status`]: status}).then(() => {
-                alert("✅ تم التحديث بنجاح!");
+
+            if (!driverName || !dateKey) {
+                alert("الرجاء التأكد من اختيار السائق والتاريخ.");
+                return;
+            }
+
+            // تحديث مباشر ومضمون في قاعدة البيانات
+            db.ref(`weeklyRecords/${weekId}/${driverName}/days/${dateKey}/status`).set(status).then(() => {
+                alert("✅ تم تحديث حالة الحضور والغياب بنجاح!");
                 closeModal('attendanceModal');
+                renderWeeklyFinancialList();
+            }).catch((error) => {
+                alert("❌ حدث خطأ أثناء الحفظ: " + error.message);
             });
         };
 
@@ -606,7 +618,6 @@
             }
         };
 
-        // دالة فتح نافذة النقل الآمن للسائق
         window.openTransferDriverModal = function(carId, driverName, shiftType) {
             document.getElementById('transDriverName').value = driverName;
             document.getElementById('transOldCarId').value = carId;
@@ -621,7 +632,6 @@
             openModal('transferDriverModal');
         };
 
-        // تنفيذ عملية النقل مع الاحتفاظ بكافة البيانات وساعات العمل وسجلات السائق
         window.executeDriverTransfer = function(e) {
             e.preventDefault();
             const driverName = document.getElementById('transDriverName').value;
@@ -630,7 +640,6 @@
             const targetCarId = Number(document.getElementById('transTargetCarSelect').value);
             const targetShiftType = document.getElementById('transTargetShiftSelect').value;
 
-            // إيجاد السيارة القديمة والسيارة الجديدة
             const oldCar = window.appState.cars.find(c => c.id === oldCarId);
             const targetCar = window.appState.cars.find(c => c.id === targetCarId);
 
@@ -639,7 +648,6 @@
                 return;
             }
 
-            // التحقق مما إذا كان الشفت المستهدف في السيارة الجديدة شاغراً
             let targetPhone = "";
             if (oldShiftType === 'day' && oldCar.dayDriver?.name === driverName) {
                 targetPhone = oldCar.dayDriver.phone || "";
@@ -655,7 +663,6 @@
                 targetCar.nightDriver = { name: driverName, phone: targetPhone };
             }
 
-            // تحديث جدول السيارات في قاعدة البيانات دون مسح السجلات المالية وساعات العمل
             db.ref('cars').set(window.appState.cars).then(() => {
                 closeModal('transferDriverModal');
                 alert(`✅ تم نقل السائق (${driverName}) بنجاح إلى السيارة الجديدة مع الاحتفاظ بكافة بياناته ورصيده وساعاته!`);
@@ -872,7 +879,6 @@
             renderActiveDriversTab();
         }
 
-        // عرض الأسطول مع زر نقل السائق الآمن بجانب كل سائق
         function renderFleet() {
             const container = document.getElementById('carsList');
             if (!container) return;
