@@ -484,13 +484,18 @@
             const startTime = Number(cachedShift.timestamp || adminShiftStartTimes[driverName]);
             if (!startTime) return alert('تعذر تحديد وقت بدء الوردية. لم يتم إجراء أي تغيير.');
             const requestedEndTime = Date.now();
+            const finalizationToken = `${Date.now()}-${Math.random()}`;
             const shiftRef = db.ref(`activeShifts/${carId}`);
             shiftRef.transaction(current => {
                 if (!current || current.driver !== driverName || Number(current.timestamp) !== startTime) return;
-                if (current.status === 'finalizing') return current.finalizedBy === 'admin' ? current : undefined;
-                return { ...current, status: 'finalizing', finalizedBy: 'admin', endTime: requestedEndTime };
+                if (current.status === 'finalizing') {
+                    const stale = Date.now() - Number(current.finalizingAt || 0) > 120000;
+                    if (current.finalizedBy !== 'admin' || !stale) return;
+                    return { ...current, finalizingAt: Date.now(), finalizationToken };
+                }
+                return { ...current, status: 'finalizing', finalizedBy: 'admin', finalizingAt: Date.now(), finalizationToken, endTime: requestedEndTime };
             }).then(result => {
-                if (!result.committed) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن السائق بدأ إنهاءها بالفعل.');
+                if (!result.committed || result.snapshot.val()?.finalizationToken !== finalizationToken) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن الإنهاء جارٍ من جهاز آخر. إذا بقيت عالقة، أعد المحاولة بعد دقيقتين.');
                 const finalShift = result.snapshot.val();
                 if (!finalShift || finalShift.finalizedBy !== 'admin') return alert('يجري إنهاء الوردية من جهة أخرى. لم يتم إجراء أي تعديل.');
                 const finalEndTime = Number(finalShift.endTime);
