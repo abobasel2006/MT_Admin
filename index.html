@@ -899,20 +899,20 @@
                         <div class="driver-subcard">
                             <div>
                                 <p class="label-day">☀️ نهاري</p>
-                                ${car.dayDriver?.name ? `<p class="name">${car.dayDriver.name}</p><p class="phone">${car.dayDriver.phone || '-'}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
+                                ${car.dayDriver?.name ? `<p class="name">${escapeHtml(car.dayDriver.name)}</p><p class="phone">${escapeHtml(car.dayDriver.phone || '-')}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
                             </div>
                             <div class="driver-actions-group">
-                                ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${car.id}, '${car.dayDriver.name}', 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.dayDriver.name)}, 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
                                 ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'day')" class="btn-del-sm">✕</button>` : ''}
                             </div>
                         </div>
                         <div class="driver-subcard">
                             <div>
                                 <p class="label-night">🌙 ليلي</p>
-                                ${car.nightDriver?.name ? `<p class="name">${car.nightDriver.name}</p><p class="phone">${car.nightDriver.phone || '-'}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
+                                ${car.nightDriver?.name ? `<p class="name">${escapeHtml(car.nightDriver.name)}</p><p class="phone">${escapeHtml(car.nightDriver.phone || '-')}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
                             </div>
                             <div class="driver-actions-group">
-                                ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${car.id}, '${car.nightDriver.name}', 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.nightDriver.name)}, 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
                                 ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'night')" class="btn-del-sm">✕</button>` : ''}
                             </div>
                         </div>
@@ -955,14 +955,26 @@
             const dayDriver = { name: document.getElementById('dayDriverName').value.trim(), phone: document.getElementById('dayDriverPhone').value.trim() };
             const nightDriver = { name: document.getElementById('nightDriverName').value.trim(), phone: document.getElementById('nightDriverPhone').value.trim() };
 
+            if (!plate || !model) return alert('أدخل رقم اللوحة وطراز السيارة.');
+            const invalidDriverName = [dayDriver.name, nightDriver.name].some(name => /[.#$\/\[\]]/.test(name));
+            if (invalidDriverName) return alert('اسم السائق يحتوي على رموز غير مسموح بها في قاعدة البيانات (. # $ / [ ]).');
+            const assignedNames = [dayDriver.name, nightDriver.name].filter(Boolean);
+            if (new Set(assignedNames).size !== assignedNames.length) return alert('لا يمكن تسجيل الاسم نفسه كسائق نهاري وليلي في السيارة ذاتها.');
+            const duplicatePlate = window.appState.cars.some(c => String(c.id) !== String(editId || '') && String(c.plate || '').trim().toLowerCase() === plate.toLowerCase());
+            if (duplicatePlate) return alert('رقم اللوحة مستخدم في سجل سيارة آخر. يجب أن تكون اللوحة فريدة.');
+            const duplicateDriver = getAllDrivers().some(d => String(d.carId) !== String(editId || '') && assignedNames.includes(d.name));
+            if (duplicateDriver) return alert('اسم السائق مسجل مسبقاً في سيارة أخرى. يجب أن يكون لكل سائق اسم مميز لتجنب تداخل السجلات.');
             if (editId) {
-                const car = window.appState.cars.find(c => c.id == editId);
-                if (car) { car.plate = plate; car.model = model; car.dayDriver = dayDriver; car.nightDriver = nightDriver; }
+                const car = window.appState.cars.find(c => String(c.id) === String(editId));
+                if (!car) return alert('تعذر العثور على سجل السيارة المطلوب تعديله.');
+                car.plate = plate; car.model = model; car.dayDriver = dayDriver; car.nightDriver = nightDriver;
             } else {
                 window.appState.cars.push({ id: Date.now(), plate, model, dayDriver, nightDriver });
             }
-            closeModal('carModal');
-            db.ref('cars').set(window.appState.cars);
+            db.ref('cars').set(window.appState.cars).then(() => {
+                closeModal('carModal');
+                alert('تم حفظ بيانات السيارة والسائقين بنجاح.');
+            }).catch(err => alert('تعذر حفظ بيانات السيارة: ' + err.message));
         }
 
         window.askDeleteCar = function(carId) {
