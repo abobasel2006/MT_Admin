@@ -994,9 +994,13 @@
             const select = document.getElementById('adminDriverSelect');
             if (!select) return;
             const drivers = getAllDrivers();
-            select.innerHTML = `<option value="">اختر السائق...</option>` + drivers.map(d => `
-                <option value="${d.name}">${d.name} (${d.car} - ${d.shift})</option>
-            `).join('');
+            select.replaceChildren(new Option('اختر السائق...', ''));
+            drivers.forEach(d => {
+                const option = document.createElement('option');
+                option.value = String(d.name);
+                option.textContent = `${d.name} (${d.car} - ${d.shift})`;
+                select.appendChild(option);
+            });
         }
 
         window.adminAddTransaction = function(e) {
