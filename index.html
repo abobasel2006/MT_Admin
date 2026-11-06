@@ -481,7 +481,863 @@
         // Apply a shift's financial effect once per week. The marker and totals
         // are committed in the same transaction, so retries cannot add hours twice.
         async function applyShiftHoursOnce(driverName, carId, startTime, endTime, shiftData, includeEndOdometer) {
-            const shiftId = 'shift_' + String(carId).replace(/[.#$\\/\\[\\]]/g, '_') + '_' + startTime;
+            const shiftId = 'shift_' + String(carId).replaceAll('.', '_').replaceAll('#', '_').replaceAll(' + '_' + startTime;
+            const totals = {};
+            let cursor = startTime;
+            while (cursor < endTime) {
+                const day = new Date(cursor);
+                const nextDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+                const segmentEnd = Math.min(endTime, nextDay);
+                const week = getSaturdayWeekId(new Date(cursor));
+                const dayKey = localDateKey(new Date(cursor));
+                if (!totals[week]) totals[week] = {};
+                totals[week][dayKey] = (totals[week][dayKey] || 0) + (segmentEnd - cursor) / 3600000;
+                cursor = segmentEnd;
+            }
+
+            const endWeek = getSaturdayWeekId(new Date(endTime));
+            const endDay = localDateKey(new Date(endTime));
+            await Promise.all(Object.entries(totals).map(([weekId, days]) => {
+                const recordRef = db.ref(`weeklyRecords/${weekId}/${driverName}`);
+                return recordRef.transaction(current => {
+                    const record = current || {};
+                    if (record.processedShiftIds && record.processedShiftIds[shiftId]) return;
+                    const next = { ...record };
+                    next.processedShiftIds = { ...(record.processedShiftIds || {}), [shiftId]: true };
+                    const weekHours = Object.values(days).reduce((sum, value) => sum + value, 0);
+                    next.hours = (Number(record.hours) || 0) + weekHours;
+                    const todayHours = days[endDay] || 0;
+                    if (todayHours) next.todayHours = (Number(record.todayHours) || 0) + todayHours;
+                    next.days = { ...(record.days || {}) };
+                    Object.entries(days).forEach(([dayKey, hours]) => {
+                        const dayRecord = { ...(next.days[dayKey] || {}) };
+                        const dayStart = new Date(dayKey + 'T00:00:00');
+                        const nextMidnight = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1).getTime();
+                        dayRecord.endTime = Math.min(endTime, nextMidnight);
+                        dayRecord.hours = hours;
+                        dayRecord.status = 'present';
+                        if (dayKey === localDateKey(new Date(startTime))) {
+                            dayRecord.startTime = startTime;
+                            if (shiftData.odoStartImg) dayRecord.odoStartImg = shiftData.odoStartImg;
+                        }
+                        if (includeEndOdometer && dayKey === endDay && shiftData.endOdoImg) dayRecord.odoEndImg = shiftData.endOdoImg;
+                        next.days[dayKey] = dayRecord;
+                    });
+                    if (Object.prototype.hasOwnProperty.call(days, localDateKey(new Date(startTime)))) {
+                        next.odoStartImg = shiftData.odoStartImg || '';
+                        next.odoStartTimestamp = startTime;
+                    }
+                    if (weekId === endWeek) {
+                        next.lastShiftStart = startTime;
+                        next.lastShiftEnd = endTime;
+                        if (includeEndOdometer) {
+                            next.odoEndImg = shiftData.endOdoImg || '';
+                            next.odoEndTimestamp = endTime;
+                        }
+                    }
+                    return next;
+                }).then(result => {
+                    if (!result.committed) {
+                        const value = result.snapshot && result.snapshot.val();
+                        if (!value || !value.processedShiftIds || value.processedShiftIds[shiftId] !== true) {
+                            throw new Error('تعذر تثبيت سجل ساعات الوردية للأسبوع ' + weekId);
+                        }
+                    }
+                });
+            }));
+
+            // Clear only the exact shift that was finalized; never clear a newer shift.
+            const clearResult = await db.ref(`activeShifts/${carId}`).transaction(current => {
+                if (!current || Number(current.timestamp) !== startTime || current.driver !== driverName) return;
+                return null;
+            });
+            if (!clearResult.committed && clearResult.snapshot && clearResult.snapshot.exists()) {
+                throw new Error('تم حفظ الساعات، لكن تغيرت حالة السيارة قبل تحرير الوردية. راجع الحالة قبل أي إجراء يدوي.');
+            }
+            return shiftId;
+        }
+
+        window.adminEndShift = function(carId, driverName) {
+            if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
+            carId = String(carId);
+            const cachedShift = window.appState.activeShifts[carId] || {};
+            const startTime = Number(cachedShift.timestamp || adminShiftStartTimes[driverName]);
+            if (!startTime) return alert('تعذر تحديد وقت بدء الوردية. لم يتم إجراء أي تغيير.');
+            const requestedEndTime = Date.now();
+            const finalizationToken = `${Date.now()}-${Math.random()}`;
+            const shiftRef = db.ref(`activeShifts/${carId}`);
+            shiftRef.transaction(current => {
+                if (!current || current.driver !== driverName || Number(current.timestamp) !== startTime) return;
+                if (current.status === 'finalizing') {
+                    const stale = Date.now() - Number(current.finalizingAt || 0) > 120000;
+                    if (current.finalizedBy !== 'admin' || !stale) return;
+                    return { ...current, finalizingAt: Date.now(), finalizationToken };
+                }
+                return { ...current, status: 'finalizing', finalizedBy: 'admin', finalizingAt: Date.now(), finalizationToken, endTime: requestedEndTime };
+            }).then(result => {
+                if (!result.committed || result.snapshot.val()?.finalizationToken !== finalizationToken) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن الإنهاء جارٍ من جهاز آخر. أعد المحاولة لاحقاً إذا بقيت عالقة.');
+                const finalShift = result.snapshot.val();
+                if (!finalShift || finalShift.finalizedBy !== 'admin') throw new Error('يجري إنهاء الوردية من جهة أخرى.');
+                const finalEndTime = Number(finalShift.endTime);
+                if (!finalEndTime || finalEndTime <= startTime) throw new Error('وقت إنهاء الوردية غير صالح.');
+                return applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, finalShift, false).then(() => {
+                    delete adminShiftStartTimes[driverName];
+                    alert(`تم إنهاء وردية السائق (${driverName}) وتوزيع ساعاتها على الأيام والأسابيع الصحيحة.`);
+                });
+            }).catch(err => alert('تعذر إنهاء الوردية: ' + err.message));
+        }
+
+        window.paySalary = function(driverName, amount) {
+            if (amount <= 0) {
+                alert("لا توجد مستحقات مالية صافية لدفعها حالياً.");
+                return;
+            }
+            if (confirm(`هل أنت متأكد من تقبيض السائق (${driverName}) مبلغ وقدره ${amount.toLocaleString()} ل.س؟`)) {
+                const weekId = window.currentActiveWeek;
+                if (!window.appState.weeklyRecords[weekId]) window.appState.weeklyRecords[weekId] = {};
+                if (!window.appState.weeklyRecords[weekId][driverName]) {
+                    window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0 };
+                }
+
+                db.ref(`weeklyRecords/${weekId}/${driverName}`).update({ paid: true, paidAmount: amount }).then(() => {
+                    renderWeeklyFinancialList();
+                    alert(`تم تسجيل تقبيض (${driverName}) بمبلغ ${amount.toLocaleString()} ل.س.`);
+                }).catch(err => alert('تعذر تسجيل الدفع: ' + err.message));
+            }
+        }
+
+
+        window.approveAdvance = function(weekId, requestId) {
+            const requestRef = db.ref(`pendingAdvances/${weekId}/${requestId}`);
+            requestRef.transaction(current => {
+                if (!current || !['pending', 'approving'].includes(current.status)) return;
+                return { ...current, status: 'approving', reviewedAt: current.reviewedAt || Date.now() };
+            }).then(result => {
+                if (!result.committed) {
+                    const existing = result.snapshot && result.snapshot.val();
+                    if (existing && existing.status === 'approved') return alert('هذا الطلب معتمد مسبقاً.');
+                    return alert('هذا الطلب تمت معالجته مسبقاً أو لم يعد متاحاً.');
+                }
+                const req = result.snapshot.val();
+                const amount = Number(req.amount);
+                if (!req.driver || !Number.isFinite(amount) || amount <= 0) throw new Error('بيانات طلب السلفة غير صحيحة.');
+                const driverRef = db.ref(`weeklyRecords/${weekId}/${req.driver}`);
+                return driverRef.transaction(current => {
+                    const record = current || {};
+                    const processed = record.processedAdvanceRequestIds || {};
+                    if (processed[requestId]) return;
+                    return {
+                        ...record,
+                        advances: (Number(record.advances) || 0) + amount,
+                        processedAdvanceRequestIds: { ...processed, [requestId]: true }
+                    };
+                }).then(ledgerResult => {
+                    if (!ledgerResult.committed) {
+                        const saved = ledgerResult.snapshot && ledgerResult.snapshot.val();
+                        if (!saved || !saved.processedAdvanceRequestIds || saved.processedAdvanceRequestIds[requestId] !== true) {
+                            throw new Error('تعذر تثبيت أثر السلفة في سجل السائق.');
+                        }
+                    }
+                    return requestRef.update({ status: 'approved', approvedAt: Date.now() })
+                        .then(() => alert(`تمت الموافقة على سلفة ${req.driver} بقيمة ${amount.toLocaleString()} ل.س.`));
+                });
+            }).catch(err => alert('تعذرت الموافقة. يمكنك إعادة المحاولة بأمان؛ لن تُضاف السلفة مرتين: ' + err.message));
+        };
+
+        window.rejectAdvance = function(weekId, requestId) {
+            const requestRef = db.ref(`pendingAdvances/${weekId}/${requestId}`);
+            requestRef.transaction(current => {
+                if (!current || current.status !== 'pending') return;
+                return { ...current, status: 'rejected', reviewedAt: Date.now() };
+            }).then(result => {
+                if (!result.committed) return alert('هذا الطلب لم يعد معلقاً أو تمت معالجته مسبقاً.');
+                alert('تم رفض طلب السلفة وتسجيل القرار.');
+            }).catch(err => alert('تعذر رفض الطلب: ' + err.message));
+        };
+
+        window.openAttendanceModal = function(driverName) {
+            document.getElementById('attDriverName').value = driverName;
+            document.getElementById('attDriverNameDisplay').value = driverName;
+            const weekDays = getWeekDaysList(window.currentActiveWeek);
+            document.getElementById('attDateSelect').innerHTML = weekDays.map(d => `<option value="${d.dateKey}">${d.name} (${d.displayDate})</option>`).join('');
+            openModal('attendanceModal');
+        };
+
+        // دالة حفظ التعديل اليدوي على الحضور والغياب (تم إصلاحها وتحديثها)
+        window.saveAttendanceChange = function(e) {
+            e.preventDefault();
+            const driverName = document.getElementById('attDriverName').value;
+            const dateKey = document.getElementById('attDateSelect').value;
+            const status = document.getElementById('attStatusSelect').value;
+            const weekId = window.currentActiveWeek;
+
+            if (!driverName || !dateKey) {
+                alert("الرجاء التأكد من اختيار السائق والتاريخ.");
+                return;
+            }
+
+            // تحديث مباشر ومضمون في قاعدة البيانات
+            db.ref(`weeklyRecords/${weekId}/${driverName}/days/${dateKey}/status`).set(status).then(() => {
+                alert("✅ تم تحديث حالة الحضور والغياب بنجاح!");
+                closeModal('attendanceModal');
+                renderWeeklyFinancialList();
+            }).catch((error) => {
+                alert("❌ حدث خطأ أثناء الحفظ: " + error.message);
+            });
+        };
+
+        window.sendAdminReply = function(driverName) {
+            const inputEl = document.getElementById(`reply_input_${driverName.replace(/\s+/g, '_')}`);
+            if (!inputEl) return;
+            const text = inputEl.value.trim();
+            if (!text) return;
+            db.ref(`notes/${driverName}`).push({ sender: 'الإدارة', text: text, timestamp: Date.now() }).then(() => {
+                inputEl.value = "";
+                alert("✅ تم إرسال الرد بنجاح.");
+            });
+        };
+
+        window.toggleDropdown = function(id) {
+            const box = document.getElementById(id);
+            if (box) {
+                box.classList.toggle('active');
+            }
+        };
+
+        window.openTransferDriverModal = function(carId, driverName, shiftType) {
+            document.getElementById('transDriverName').value = driverName;
+            document.getElementById('transOldCarId').value = carId;
+            document.getElementById('transShiftType').value = shiftType;
+            document.getElementById('transDriverDisplay').value = `${driverName} (${shiftType === 'day' ? 'نهاري' : 'ليلي'})`;
+
+            const targetSelect = document.getElementById('transTargetCarSelect');
+            targetSelect.replaceChildren();
+            window.appState.cars.forEach(c => {
+                const option = document.createElement('option');
+                option.value = String(c.id);
+                option.textContent = `سيارة: ${c.plate} - ${c.model}`;
+                targetSelect.appendChild(option);
+            });
+
+            openModal('transferDriverModal');
+        };
+
+        window.executeDriverTransfer = function(e) {
+            e.preventDefault();
+            const driverName = document.getElementById('transDriverName').value;
+            const oldCarId = Number(document.getElementById('transOldCarId').value);
+            const oldShiftType = document.getElementById('transShiftType').value;
+            const targetCarId = Number(document.getElementById('transTargetCarSelect').value);
+            const targetShiftType = document.getElementById('transTargetShiftSelect').value;
+
+            const oldCar = window.appState.cars.find(c => c.id === oldCarId);
+            const targetCar = window.appState.cars.find(c => c.id === targetCarId);
+
+            if (!oldCar || !targetCar) {
+                alert("خطأ في تحديد السيارات.");
+                return;
+            }
+
+            let targetPhone = "";
+            if (oldShiftType === 'day' && oldCar.dayDriver?.name === driverName) {
+                targetPhone = oldCar.dayDriver.phone || "";
+                oldCar.dayDriver = { name: "", phone: "" };
+            } else if (oldShiftType === 'night' && oldCar.nightDriver?.name === driverName) {
+                targetPhone = oldCar.nightDriver.phone || "";
+                oldCar.nightDriver = { name: "", phone: "" };
+            }
+
+            if (targetShiftType === 'day') {
+                targetCar.dayDriver = { name: driverName, phone: targetPhone };
+            } else {
+                targetCar.nightDriver = { name: driverName, phone: targetPhone };
+            }
+
+            db.ref('cars').set(window.appState.cars).then(() => {
+                closeModal('transferDriverModal');
+                alert(`✅ تم نقل السائق (${driverName}) بنجاح إلى السيارة الجديدة مع الاحتفاظ بكافة بياناته ورصيده وساعاته!`);
+            });
+        };
+
+        function renderAdvanceNotifications() {
+            const container = document.getElementById('advanceNotificationsContainer');
+            const listEl = document.getElementById('advCardsList');
+            const countBadge = document.getElementById('advCountBadge');
+            if (!container || !listEl) return;
+            const weekId = window.currentActiveWeek;
+            const requests = window.appState.pendingAdvances?.[weekId] || {};
+            const pending = Object.entries(requests).filter(([, req]) => req && ['pending', 'approving'].includes(req.status));
+            container.style.display = pending.length ? 'block' : 'none';
+            countBadge.textContent = String(pending.length);
+            listEl.replaceChildren();
+            pending.forEach(([requestId, req]) => {
+                const card = document.createElement('div'); card.className = 'adv-alert-card';
+                const top = document.createElement('div'); top.className = 'adv-alert-top';
+                const driver = document.createElement('span'); driver.style.cssText = 'font-size:11px;font-weight:800;color:var(--accent-red);'; driver.textContent = 'السائق: ' + String(req.driver || 'غير معروف');
+                const amount = document.createElement('span'); amount.style.cssText = 'font-size:12px;font-weight:800;color:#fff;'; amount.textContent = (Number(req.amount) || 0).toLocaleString() + ' ل.س';
+                top.append(driver, amount); card.appendChild(top);
+                const note = document.createElement('p'); note.style.cssText = 'font-size:10px;margin-bottom:6px;color:var(--text-sub);'; note.textContent = 'طلب سلفة مالية أسبوعية.'; card.appendChild(note);
+                const actions = document.createElement('div'); actions.className = 'adv-actions';
+                const approve = document.createElement('button'); approve.className = 'btn-approve'; approve.textContent = req.status === 'approving' ? '↻ استكمال الاعتماد' : '✅ موافقة واعتماد'; approve.addEventListener('click', () => approveAdvance(weekId, requestId));
+                const reject = document.createElement('button'); reject.className = 'btn-reject'; reject.textContent = '❌ رفض'; reject.disabled = req.status === 'approving'; reject.addEventListener('click', () => rejectAdvance(weekId, requestId));
+                actions.append(approve, reject); card.appendChild(actions); listEl.appendChild(card);
+            });
+        }
+
+        function renderActiveDriversTab() {
+            const container = document.getElementById('activeDriversListContainer');
+            if (!container) return;
+
+            const activeShifts = window.appState.activeShifts || {};
+            const activeCarIds = Object.keys(activeShifts);
+
+            if (activeCarIds.length === 0) {
+                container.innerHTML = `<p style="text-align: center; color: var(--text-sub); font-size: 11px; padding: 15px;">لا توجد ورديات نشطة حالياً.</p>`;
+                return;
+            }
+
+            container.innerHTML = activeCarIds.map(carId => {
+                const shift = activeShifts[carId];
+                if (!shift) return '';
+                const startTime = shift.timestamp || Date.now();
+                const elapsedSecs = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
+                const h = Math.floor(elapsedSecs / 3600);
+                const m = Math.floor((elapsedSecs % 3600) / 60);
+                const s = elapsedSecs % 60;
+
+                return `
+                    <div class="fin-row" style="margin-bottom: 8px;">
+                        <div class="fin-row-top">
+                            <div>
+                                <span class="d-name">${escapeHtml(shift.driver)}</span>
+                                <span class="status-pill status-on">🟢 في وردية نشطة</span>
+                                <span class="d-car">(سيارة: ${escapeHtml(shift.car)})</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span class="live-timer-badge">⏱️ ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}</span>
+                                <button class="btn-end-shift" onclick="adminEndShift(${Number(carId)}, ${inlineArg(shift.driver)})">🛑 إنهاء الوردية</button>
+                            </div>
+                        </div>
+                        <p style="font-size: 10px; color: var(--text-sub);">وقت البدء: ${formatDateTime(startTime)}</p>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        setInterval(() => {
+            updateLiveTimersAndSalaries();
+        }, 1000);
+
+        function updateLiveTimersAndSalaries() {
+            const weekData = window.appState.weeklyRecords[window.currentActiveWeek] || {};
+            const drivers = getAllDrivers();
+
+            drivers.forEach(d => {
+                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, todayHours: 0 };
+                
+                let isOnDuty = false;
+                let activeCarId = null;
+                Object.keys(window.appState.activeShifts).forEach(carId => {
+                    let val = window.appState.activeShifts[carId];
+                    let drv = (typeof val === 'object' && val !== null) ? val.driver : val;
+                    if (drv === d.name && String(carId) === String(d.carId) && (!val || typeof val !== 'object' || !val.shift || val.shift === d.shift)) {
+                        isOnDuty = true;
+                        activeCarId = carId;
+                    }
+                });
+
+                let liveSecs = 0;
+                let shiftStartTime = null;
+                if (isOnDuty) {
+                    const shiftData = window.appState.activeShifts[activeCarId];
+                    shiftStartTime = (typeof shiftData === 'object' && shiftData !== null) ? shiftData.timestamp : (rec.imgTimestamp || adminShiftStartTimes[d.name] || Date.now());
+                    if (!adminShiftStartTimes[d.name]) adminShiftStartTimes[d.name] = shiftStartTime;
+                    liveSecs = Math.max(0, Math.floor((Date.now() - shiftStartTime) / 1000));
+                } else {
+                    delete adminShiftStartTimes[d.name];
+                }
+
+                let totalHours = (rec.hours || 0) + (liveSecs / 3600);
+                let todayHours = (rec.todayHours || 0) + (liveSecs / 3600);
+                let totalSecs = Math.floor(totalHours * 3600);
+
+                const h = Math.floor(totalSecs / 3600);
+                const m = Math.floor((totalSecs % 3600) / 60);
+                const s = totalSecs % 60;
+
+                const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
+                const liveSalary = totalHours * driverRate;
+                const rewards = rec.rewards || 0;
+                const netDue = liveSalary + rewards - (rec.advances || 0);
+
+                const timerEl = document.getElementById(`timer_${d.name.replace(/\s+/g, '_')}`);
+                const statusEl = document.getElementById(`status_${d.name.replace(/\s+/g, '_')}`);
+                const endShiftBtnEl = document.getElementById(`end_btn_${d.name.replace(/\s+/g, '_')}`);
+                const salaryEl = document.getElementById(`salary_${d.name.replace(/\s+/g, '_')}`);
+                const rewardsEl = document.getElementById(`rewards_${d.name.replace(/\s+/g, '_')}`);
+                const netEl = document.getElementById(`net_${d.name.replace(/\s+/g, '_')}`);
+                const todayHoursEl = document.getElementById(`today_hours_${d.name.replace(/\s+/g, '_')}`);
+                const weekHoursEl = document.getElementById(`week_hours_${d.name.replace(/\s+/g, '_')}`);
+                const startTimeEl = document.getElementById(`start_time_${d.name.replace(/\s+/g, '_')}`);
+                const endTimeEl = document.getElementById(`end_time_${d.name.replace(/\s+/g, '_')}`);
+
+                if (timerEl) timerEl.innerText = `⏱️ ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                if (statusEl) {
+                    statusEl.className = isOnDuty ? "status-pill status-on" : "status-pill status-off";
+                    statusEl.innerText = isOnDuty ? "🟢 في وردية" : "⚪ في استراحة";
+                }
+                if (endShiftBtnEl) {
+                    if (isOnDuty && activeCarId) {
+                        endShiftBtnEl.style.display = 'inline-flex';
+                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${inlineArg(String(activeCarId))}, ${inlineArg(d.name)})`);
+                    } else {
+                        endShiftBtnEl.style.display = 'none';
+                    }
+                }
+                if (salaryEl) salaryEl.innerText = `${Math.round(liveSalary).toLocaleString()} ل.س`;
+                if (rewardsEl) rewardsEl.innerText = `${rewards.toLocaleString()} ل.س`;
+                if (netEl) netEl.innerText = `${Math.round(netDue).toLocaleString()} ل.س`;
+                
+                if (todayHoursEl) todayHoursEl.innerText = `${todayHours.toFixed(1)} س`;
+                if (weekHoursEl) weekHoursEl.innerText = `${totalHours.toFixed(1)} س`;
+
+                if (startTimeEl) {
+                    let st = null;
+                    if (isOnDuty && shiftStartTime) {
+                        st = shiftStartTime;
+                    } else if (rec.lastShiftStart) {
+                        st = rec.lastShiftStart;
+                    } else {
+                        const todayKey = localDateKey();
+                        if (rec.days && rec.days[todayKey] && rec.days[todayKey].startTime) {
+                            st = rec.days[todayKey].startTime;
+                        }
+                    }
+                    startTimeEl.innerText = st ? formatTime(st) : '--:--';
+                }
+
+                if (endTimeEl) {
+                    let et = null;
+                    if (isOnDuty) {
+                        et = 'قيد العمل';
+                    } else if (rec.lastShiftEnd) {
+                        et = formatTime(rec.lastShiftEnd);
+                    } else {
+                        const todayKey = localDateKey();
+                        if (rec.days && rec.days[todayKey] && rec.days[todayKey].endTime) {
+                            et = formatTime(rec.days[todayKey].endTime);
+                        } else {
+                            et = '--:--';
+                        }
+                    }
+                    endTimeEl.innerText = et;
+                }
+            });
+        }
+
+        function getAllDrivers() {
+            let drivers = [];
+            window.appState.cars.forEach(c => {
+                if (c.dayDriver?.name?.trim()) drivers.push({ name: c.dayDriver.name, car: c.plate, shift: 'نهاري', carId: c.id });
+                if (c.nightDriver?.name?.trim()) drivers.push({ name: c.nightDriver.name, car: c.plate, shift: 'ليلي', carId: c.id });
+            });
+            return drivers;
+        }
+
+        function renderApp() {
+            const totalCarsEl = document.getElementById('totalCars');
+            const totalDriversEl = document.getElementById('totalDrivers');
+            if (totalCarsEl) totalCarsEl.innerText = window.appState.cars.length;
+            if (totalDriversEl) totalDriversEl.innerText = getAllDrivers().length;
+            renderFleet();
+            renderAdminDriverOptions();
+            renderWeekSelector();
+            renderWeeklyFinancialList();
+            renderAdvanceNotifications();
+            renderActiveDriversTab();
+        }
+
+        function renderFleet() {
+            const container = document.getElementById('carsList');
+            if (!container) return;
+            if (window.appState.cars.length === 0) {
+                container.innerHTML = `<div class="card" style="text-align:center; color:var(--text-sub); font-size:11px; grid-column: span 2;">لا توجد سيارات بالأسطول.</div>`;
+                return;
+            }
+            container.innerHTML = window.appState.cars.map(car => `
+                <div class="card" style="margin-bottom:0;">
+                    <div class="card-header">
+                        <div>
+                            <span style="background:rgba(245,158,11,0.2); color:var(--accent-amber); font-weight:800; font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid rgba(245,158,11,0.3);">${escapeHtml(car.plate)}</span>
+                            <h3 style="font-size:13px; font-weight:800; margin-top:4px;">${escapeHtml(car.model)}</h3>
+                        </div>
+                        <div>
+                            <button onclick="editCar(${car.id})" style="background:transparent; border:none; color:var(--text-sub); font-size:12px; cursor:pointer; margin-left:6px;">✏️</button>
+                            <button onclick="askDeleteCar(${car.id})" style="background:transparent; border:none; color:var(--accent-red); font-size:12px; cursor:pointer;">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="drivers-grid">
+                        <div class="driver-subcard">
+                            <div>
+                                <p class="label-day">☀️ نهاري</p>
+                                ${car.dayDriver?.name ? `<p class="name">${escapeHtml(car.dayDriver.name)}</p><p class="phone">${escapeHtml(car.dayDriver.phone || '-')}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
+                            </div>
+                            <div class="driver-actions-group">
+                                ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.dayDriver.name)}, 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'day')" class="btn-del-sm">✕</button>` : ''}
+                            </div>
+                        </div>
+                        <div class="driver-subcard">
+                            <div>
+                                <p class="label-night">🌙 ليلي</p>
+                                ${car.nightDriver?.name ? `<p class="name">${escapeHtml(car.nightDriver.name)}</p><p class="phone">${escapeHtml(car.nightDriver.phone || '-')}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
+                            </div>
+                            <div class="driver-actions-group">
+                                ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.nightDriver.name)}, 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'night')" class="btn-del-sm">✕</button>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.openAddCarModal = function() {
+            document.getElementById('carEditId').value = "";
+            document.getElementById('carPlate').value = "";
+            document.getElementById('carModel').value = "";
+            document.getElementById('dayDriverName').value = "";
+            document.getElementById('dayDriverPhone').value = "";
+            document.getElementById('nightDriverName').value = "";
+            document.getElementById('nightDriverPhone').value = "";
+            document.getElementById('modalTitle').innerText = "إضافة سيارة";
+            openModal('carModal');
+        }
+
+        window.editCar = function(carId) {
+            const car = window.appState.cars.find(c => c.id === carId);
+            if (!car) return;
+            document.getElementById('carEditId').value = car.id;
+            document.getElementById('carPlate').value = car.plate;
+            document.getElementById('carModel').value = car.model;
+            document.getElementById('dayDriverName').value = car.dayDriver?.name || "";
+            document.getElementById('dayDriverPhone').value = car.dayDriver?.phone || "";
+            document.getElementById('nightDriverName').value = car.nightDriver?.name || "";
+            document.getElementById('nightDriverPhone').value = car.nightDriver?.phone || "";
+            document.getElementById('modalTitle').innerText = "تعديل السيارة";
+            openModal('carModal');
+        }
+
+        window.saveCar = function(e) {
+            e.preventDefault();
+            const editId = document.getElementById('carEditId').value;
+            const plate = document.getElementById('carPlate').value.trim();
+            const model = document.getElementById('carModel').value.trim();
+            const dayDriver = { name: document.getElementById('dayDriverName').value.trim(), phone: document.getElementById('dayDriverPhone').value.trim() };
+            const nightDriver = { name: document.getElementById('nightDriverName').value.trim(), phone: document.getElementById('nightDriverPhone').value.trim() };
+
+            if (!plate || !model) return alert('أدخل رقم اللوحة وطراز السيارة.');
+            const invalidDriverName = [dayDriver.name, nightDriver.name].some(name => /[.#$\/\[\]]/.test(name));
+            if (invalidDriverName) return alert('اسم السائق يحتوي على رموز غير مسموح بها في قاعدة البيانات (. # $ / [ ]).');
+            const assignedNames = [dayDriver.name, nightDriver.name].filter(Boolean);
+            if (new Set(assignedNames).size !== assignedNames.length) return alert('لا يمكن تسجيل الاسم نفسه كسائق نهاري وليلي في السيارة ذاتها.');
+            const duplicatePlate = window.appState.cars.some(c => String(c.id) !== String(editId || '') && String(c.plate || '').trim().toLowerCase() === plate.toLowerCase());
+            if (duplicatePlate) return alert('رقم اللوحة مستخدم في سجل سيارة آخر. يجب أن تكون اللوحة فريدة.');
+            const duplicateDriver = getAllDrivers().some(d => String(d.carId) !== String(editId || '') && assignedNames.includes(d.name));
+            if (duplicateDriver) return alert('اسم السائق مسجل مسبقاً في سيارة أخرى. يجب أن يكون لكل سائق اسم مميز لتجنب تداخل السجلات.');
+            if (editId) {
+                const car = window.appState.cars.find(c => String(c.id) === String(editId));
+                if (!car) return alert('تعذر العثور على سجل السيارة المطلوب تعديله.');
+                car.plate = plate; car.model = model; car.dayDriver = dayDriver; car.nightDriver = nightDriver;
+            } else {
+                window.appState.cars.push({ id: Date.now(), plate, model, dayDriver, nightDriver });
+            }
+            db.ref('cars').set(window.appState.cars).then(() => {
+                closeModal('carModal');
+                alert('تم حفظ بيانات السيارة والسائقين بنجاح.');
+            }).catch(err => alert('تعذر حفظ بيانات السيارة: ' + err.message));
+        }
+
+        window.askDeleteCar = function(carId) {
+            const car = window.appState.cars.find(c => c.id === carId);
+            if (!car) return;
+            document.getElementById('deleteModalTitle').innerText = "حذف السيارة";
+            document.getElementById('deleteModalDesc').innerText = `هل تريد حذف (${car.plate})؟`;
+            pendingDeleteAction = () => {
+                window.appState.cars = window.appState.cars.filter(c => c.id !== carId);
+                db.ref('cars').set(window.appState.cars);
+            };
+            openModal('deleteModal');
+        }
+
+        window.askRemoveDriver = function(carId, shiftType) {
+            const car = window.appState.cars.find(c => c.id === carId);
+            if (!car) return;
+            document.getElementById('deleteModalTitle').innerText = "إزالة السائق";
+            document.getElementById('deleteModalDesc').innerText = `إزالة سائق الشفت للسيارة (${car.plate})؟`;
+            pendingDeleteAction = () => {
+                if (shiftType === 'day') car.dayDriver = { name: "", phone: "" };
+                if (shiftType === 'night') car.nightDriver = { name: "", phone: "" };
+                db.ref('cars').set(window.appState.cars);
+            };
+            openModal('deleteModal');
+        }
+
+        const btnConfirmDelete = document.getElementById('btnConfirmDelete');
+        if (btnConfirmDelete) {
+            btnConfirmDelete.addEventListener('click', () => {
+                if (pendingDeleteAction) pendingDeleteAction();
+                closeModal('deleteModal');
+                pendingDeleteAction = null;
+            });
+        }
+
+        function renderAdminDriverOptions() {
+            const select = document.getElementById('adminDriverSelect');
+            if (!select) return;
+            const drivers = getAllDrivers();
+            select.replaceChildren(new Option('اختر السائق...', ''));
+            drivers.forEach(d => {
+                const option = document.createElement('option');
+                option.value = String(d.name);
+                option.textContent = `${d.name} (${d.car} - ${d.shift})`;
+                select.appendChild(option);
+            });
+        }
+
+        window.adminAddTransaction = function(e) {
+            e.preventDefault();
+            const driverName = document.getElementById('adminDriverSelect').value;
+            const actionType = document.getElementById('adminActionType').value;
+            const amount = Number(document.getElementById('adminAmount').value) || 0;
+            if (!driverName || !Number.isFinite(amount) || amount <= 0) return alert('تحقق من اختيار السائق والقيمة.');
+            const weekId = getSaturdayWeekId();
+            if (!getAllDrivers().some(driver => driver.name === driverName)) return alert('السائق المحدد غير موجود في الأسطول الحالي.');
+            if (!['hours', 'deduct_hours', 'reward', 'advance', 'custom_rate'].includes(actionType)) return alert('نوع العملية غير صالح.');
+            db.ref(`weeklyRecords/${weekId}/${driverName}`).transaction(rec => {
+                rec = rec || { hours: 0, advances: 0, rewards: 0, days: {} };
+                if (actionType === 'hours') { rec.hours = (Number(rec.hours) || 0) + amount; rec.todayHours = (Number(rec.todayHours) || 0) + amount; }
+                else if (actionType === 'deduct_hours') { rec.hours = Math.max(0, (Number(rec.hours) || 0) - amount); rec.todayHours = Math.max(0, (Number(rec.todayHours) || 0) - amount); }
+                else if (actionType === 'reward') rec.rewards = (Number(rec.rewards) || 0) + amount;
+                else if (actionType === 'advance') rec.advances = (Number(rec.advances) || 0) + amount;
+                else if (actionType === 'custom_rate') rec.customHourlyRate = amount;
+                return rec;
+            }).then(result => {
+                if (!result.committed) return alert('لم يتم تنفيذ العملية.');
+                document.getElementById('adminAmount').value = '';
+                alert('تم تنفيذ العملية وتحديث السجل بنجاح.');
+            }).catch(err => alert('تعذر تنفيذ العملية: ' + err.message));
+        }
+
+        function renderWeekSelector() {
+            const selector = document.getElementById('weekSelector');
+            if (!selector) return;
+            const thisWeek = getSaturdayWeekId();
+            let weeks = Object.keys(window.appState.weeklyRecords);
+            if (!weeks.includes(thisWeek)) weeks.push(thisWeek);
+            weeks.sort().reverse();
+
+            selector.innerHTML = weeks.map(w => `
+                <option value="${w}" ${w === window.currentActiveWeek ? 'selected' : ''}>أسبوع (من سبت): ${w.replace('-W_Sat_', ' ')} ${w === thisWeek ? '(الحالي)' : ''}</option>
+            `).join('');
+        }
+
+        window.changeWeekView = function() {
+            const selector = document.getElementById('weekSelector');
+            if (selector) window.currentActiveWeek = selector.value;
+            renderWeeklyFinancialList();
+            renderAdvanceNotifications();
+        }
+
+        window.clearCurrentWeek = function() {
+            if (confirm("هل تريد تصفية هذا الأسبوع؟")) {
+                if (window.appState.weeklyRecords[window.currentActiveWeek]) {
+                    const updates = {};
+                    Object.keys(window.appState.weeklyRecords[window.currentActiveWeek]).forEach(d => { updates[`weeklyRecords/${window.currentActiveWeek}/${d}/settled`] = true; });
+                    db.ref().update(updates).then(() => alert('تم تسجيل تصفية الأسبوع.')).catch(err => alert('تعذر حفظ التصفية: ' + err.message));
+                }
+            }
+        }
+
+        function renderWeeklyFinancialList() {
+            const container = document.getElementById('driversFinancialList');
+            if (!container) return;
+            const drivers = getAllDrivers();
+            if (drivers.length === 0) {
+                container.innerHTML = `<p style="font-size:11px; text-align:center; color:var(--text-sub); padding:10px;">لا توجد بيانات للسائقين حالياً.</p>`;
+                return;
+            }
+            const weekData = window.appState.weeklyRecords[window.currentActiveWeek] || {};
+            const weekDays = getWeekDaysList(window.currentActiveWeek);
+            const todayStr = localDateKey();
+
+            container.innerHTML = drivers.map(d => {
+                const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '', paid: false, todayHours: 0, days: {} };
+                const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
+                const initialSalary = (rec.hours || 0) * driverRate;
+                const rewards = rec.rewards || 0;
+                const netDue = initialSalary + rewards - (rec.advances || 0);
+                
+                const timerId = `timer_${d.name.replace(/\s+/g, '_')}`;
+                const statusId = `status_${d.name.replace(/\s+/g, '_')}`;
+                const endBtnId = `end_btn_${d.name.replace(/\s+/g, '_')}`;
+                const salaryId = `salary_${d.name.replace(/\s+/g, '_')}`;
+                const netId = `net_${d.name.replace(/\s+/g, '_')}`;
+                const todayHoursId = `today_hours_${d.name.replace(/\s+/g, '_')}`;
+                const weekHoursId = `week_hours_${d.name.replace(/\s+/g, '_')}`;
+                const startTimeId = `start_time_${d.name.replace(/\s+/g, '_')}`;
+                const endTimeId = `end_time_${d.name.replace(/\s+/g, '_')}`;
+                const dropdownId = `dropdown_days_${d.name.replace(/\s+/g, '_')}`;
+
+                let daysRowsHtml = weekDays.map(day => {
+                    const dayData = rec.days && rec.days[day.dateKey];
+                    let startT = dayData?.startTime ? formatTime(dayData.startTime) : '--:--';
+                    let endT = dayData?.endTime ? formatTime(dayData.endTime) : (dayData?.startTime ? 'قيد العمل' : '--:--');
+                    let dayHours = Number.isFinite(Number(dayData?.hours)) ? Number(dayData.hours).toFixed(1) + ' س' : (dayData?.startTime && dayData?.endTime ? ((dayData.endTime - dayData.startTime) / 3600000).toFixed(1) + ' س' : (dayData?.startTime ? 'قيد العمل' : '0 س'));
+                    
+                    let statusLabel = day.dateKey < todayStr ? '❌ غياب' : (day.dateKey === todayStr ? '⏳ اليوم' : '⏳ قادم');
+                    let statusColor = 'var(--text-sub)';
+
+                    if (dayData?.status === 'absent') {
+                        statusLabel = '❌ غائب'; statusColor = 'var(--accent-red)';
+                    } else if (dayData?.status === 'present' || dayData?.startTime) {
+                        statusLabel = '✅ حاضر'; statusColor = 'var(--accent-green)';
+                    }
+
+                    return `
+                        <div class="day-row-card">
+                            <div class="day-row-header">
+                                <span>📅 ${day.name} (${day.displayDate})</span>
+                                <span style="color:${statusColor};">${statusLabel}</span>
+                            </div>
+                            <div class="day-row-details">
+                                <div>بدء: <b>${startT}</b></div>
+                                <div>انتهاء: <b>${endT}</b></div>
+                                <div>ساعات اليوم: <b style="color:var(--accent-amber);">${dayHours}</b></div>
+                                <div>عداد البداية: ${dayData?.odoStartImg || rec.odoStartImg ? `<button onclick="showImage(${inlineArg(dayData?.odoStartImg || rec.odoStartImg)}, ${inlineArg('صورة عداد البداية (' + day.name + ')')}, ${inlineArg(formatDateTime(dayData?.startTime || rec.odoStartTimestamp))}) " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد النهاية: ${dayData?.odoEndImg || rec.odoEndImg ? `<button onclick="showImage(${inlineArg(dayData?.odoEndImg || rec.odoEndImg)}, ${inlineArg('صورة عداد النهاية (' + day.name + ')')}, ${inlineArg(formatDateTime(dayData?.endTime || rec.odoEndTimestamp))}) " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                const notesArr = Object.values(window.appState.driverNotes[d.name] || {});
+                const notesHtml = notesArr.length > 0 ? notesArr.map(n => `<div class="admin-note-item"><b>${escapeHtml(n.sender)}:</b> ${escapeHtml(n.text)}</div>`).join('') : '<p style="color:var(--text-sub); text-align:center;">لا توجد ملاحظات.</p>';
+
+                return `
+                    <div class="fin-row">
+                        <div class="fin-row-top">
+                            <div>
+                                <span class="d-name">${escapeHtml(d.name)}</span>
+                                <span id="${statusId}" class="status-pill status-off">⚪ في استراحة</span>
+                                <span class="d-car">(${escapeHtml(d.car)} - ${escapeHtml(d.shift)})</span>
+                                ${rec.customHourlyRate ? `<span style="font-size:9px; color:var(--accent-amber); background:rgba(245,158,11,0.2); padding:2px 6px; border-radius:4px; margin-right:4px;">أجر خصيص: ${Number(rec.customHourlyRate).toLocaleString()} ل.س</span>` : ''}
+                            </div>
+                            <div style="display:flex; align-items:center; gap:6px;">
+                                <span id="${timerId}" class="live-timer-badge">⏱️ 00:00:00</span>
+                                <button id="${endBtnId}" class="btn-end-shift" style="display:none;">🛑 إنهاء الوردية</button>
+                            </div>
+                        </div>
+
+                        <div class="shift-times-box">
+                            <span>🟢 بدء الوردية: <b id="${startTimeId}">--:--</b></span>
+                            <span>🔴 إنهاء الوردية: <b id="${endTimeId}">--:--</b></span>
+                        </div>
+
+                        <div class="weekly-sched-container">
+                            <button onclick="toggleDropdown(${inlineArg(dropdownId)})" class="dropdown-toggle-btn">
+                                <span>📅 جدول الدوام والحضور الأسبوعي (اضغط للعرض/الإخفاء)</span>
+                                <span style="font-size:10px; color:var(--accent-indigo);" onclick="event.stopPropagation(); openAttendanceModal(${inlineArg(d.name)})">✏️ تعديل الحضور</span>
+                            </button>
+                            <div id="${dropdownId}" class="dropdown-content-box">
+                                ${daysRowsHtml}
+                            </div>
+                        </div>
+
+                        <div class="weekly-sched-container">
+                            <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والدردشة</div>
+                            <div class="admin-notes-box">${notesHtml}</div>
+                            <div style="display:flex; gap:6px; margin-top:4px;">
+                                <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
+                                <button onclick="sendAdminReply(${inlineArg(d.name)})" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
+                            </div>
+                        </div>
+
+                        <div class="fin-stats-grid">
+                            <div class="fin-box"><p class="lbl">ساعات اليوم</p><p id="${todayHoursId}" class="val val-indigo">0 س</p></div>
+                            <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p id="${weekHoursId}" class="val val-amber">0 س</p></div>
+                            <div class="fin-box"><p class="lbl">الأجر</p><p id="${salaryId}" class="val val-green">${Math.round(initialSalary).toLocaleString()} ل.س</p></div>
+                            <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
+                            <div class="fin-box"><p class="lbl">الصافي</p><p id="${netId}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
+                        </div>
+                        <div class="pay-salary-box">
+                            <div>
+                                <span style="font-size:10px; font-weight:700; color:${rec.paid ? 'var(--accent-green)' : 'var(--text-sub)'};">
+                                    ${rec.paid ? '✅ تم إرسال الراتب (' + (rec.paidAmount || Math.round(netDue)).toLocaleString() + ' ل.س)' : '⏳ الراتب بانتظار التقبيض'}
+                                </span>
+                            </div>
+                            <button onclick="paySalary(${inlineArg(d.name)}, ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">
+                                ${rec.paid ? 'تم التقبيض' : '💵 تقبيض الراتب'}
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            updateLiveTimersAndSalaries();
+        }
+
+        window.showImage = function(base64Str, titleText, timeText) {
+            document.getElementById('modalImgTitle').innerText = titleText;
+            document.getElementById('modalImgTime').innerText = `🕒 وقت الالتقاط: ${timeText}`;
+            const imgEl = document.getElementById('modalOdoImg');
+            if (imgEl) imgEl.src = base64Str;
+            openModal('imageModal');
+        }
+
+        window.openModal = function(id) {
+            const modal = document.getElementById(id);
+            if (modal) modal.classList.add('active');
+        }
+        window.closeModal = function(id) {
+            const modal = document.getElementById(id);
+            if (modal) modal.classList.remove('active');
+        }
+
+        window.switchTab = function(tab) {
+            const tabFleet = document.getElementById('tabFleet');
+            const tabActiveDrivers = document.getElementById('tabActiveDrivers');
+            const tabSalary = document.getElementById('tabSalary');
+            
+            const tabFleetBtn = document.getElementById('tabFleetBtn');
+            const tabActiveDriversBtn = document.getElementById('tabActiveDriversBtn');
+            const tabSalaryBtn = document.getElementById('tabSalaryBtn');
+
+            if (!tabFleet || !tabActiveDrivers || !tabSalary) return;
+
+            tabFleet.classList.remove('active');
+            tabActiveDrivers.classList.remove('active');
+            tabSalary.classList.remove('active');
+            
+            tabFleetBtn.classList.remove('active');
+            tabActiveDriversBtn.classList.remove('active');
+            tabSalaryBtn.classList.remove('active');
+
+            if (tab === 'fleet') {
+                tabFleet.classList.add('active');
+                tabFleetBtn.classList.add('active');
+            } else if (tab === 'activeDrivers') {
+                tabActiveDrivers.classList.add('active');
+                tabActiveDriversBtn.classList.add('active');
+            } else {
+                tabSalary.classList.add('active');
+                tabSalaryBtn.classList.add('active');
+            }
+        }
+    </script>
+</body>
+</html>
+, '_').replaceAll('/', '_').replaceAll('[', '_').replaceAll(']', '_') + '_' + startTime;
             const totals = {};
             let cursor = startTime;
             while (cursor < endTime) {
