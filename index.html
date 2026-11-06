@@ -479,22 +479,28 @@
 
         window.adminEndShift = function(carId, driverName) {
             if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
-            const cachedShift = window.appState.activeShifts[String(carId)] || window.appState.activeShifts[carId] || {};
+            carId = String(carId);
+            const cachedShift = window.appState.activeShifts[carId] || {};
             const startTime = Number(cachedShift.timestamp || adminShiftStartTimes[driverName]);
             if (!startTime) return alert('تعذر تحديد وقت بدء الوردية. لم يتم إجراء أي تغيير.');
-            const endTime = Date.now();
+            const requestedEndTime = Date.now();
             const shiftRef = db.ref(`activeShifts/${carId}`);
             shiftRef.transaction(current => {
                 if (!current || current.driver !== driverName || Number(current.timestamp) !== startTime) return;
-                return null;
+                if (current.status === 'finalizing') return current.finalizedBy === 'admin' ? current : undefined;
+                return { ...current, status: 'finalizing', finalizedBy: 'admin', endTime: requestedEndTime };
             }).then(result => {
-                if (!result.committed) return alert('لم تعد هناك وردية نشطة مطابقة. ربما أنهاها السائق بالفعل.');
+                if (!result.committed) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن السائق بدأ إنهاءها بالفعل.');
+                const finalShift = result.snapshot.val();
+                if (!finalShift || finalShift.finalizedBy !== 'admin') return alert('يجري إنهاء الوردية من جهة أخرى. لم يتم إجراء أي تعديل.');
+                const finalEndTime = Number(finalShift.endTime);
+                if (!finalEndTime || finalEndTime <= startTime) throw new Error('وقت إنهاء الوردية غير صالح.');
                 const totals = {};
                 let cursor = startTime;
-                while (cursor < endTime) {
+                while (cursor < finalEndTime) {
                     const day = new Date(cursor);
                     const nextDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-                    const segmentEnd = Math.min(endTime, nextDay);
+                    const segmentEnd = Math.min(finalEndTime, nextDay);
                     const week = getSaturdayWeekId(new Date(cursor));
                     const dayKey = localDateKey(new Date(cursor));
                     if (!totals[week]) totals[week] = {};
@@ -504,16 +510,19 @@
                 const updates = {};
                 Object.entries(totals).forEach(([week, days]) => Object.entries(days).forEach(([dayKey, hours]) => {
                     updates[`weeklyRecords/${week}/${driverName}/hours`] = firebase.database.ServerValue.increment(hours);
-                    if (dayKey === localDateKey(new Date(endTime))) updates[`weeklyRecords/${week}/${driverName}/todayHours`] = firebase.database.ServerValue.increment(hours);
+                    if (dayKey === localDateKey(new Date(finalEndTime))) updates[`weeklyRecords/${week}/${driverName}/todayHours`] = firebase.database.ServerValue.increment(hours);
+                    const dayStart = new Date(dayKey + 'T00:00:00');
+                    const nextMidnight = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1).getTime();
                     updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/hours`] = hours;
                     updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/status`] = 'present';
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/endTime`] = Math.min(endTime, new Date(new Date(dayKey + 'T00:00:00').getFullYear(), new Date(dayKey + 'T00:00:00').getMonth(), new Date(dayKey + 'T00:00:00').getDate() + 1).getTime());
+                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/endTime`] = Math.min(finalEndTime, nextMidnight);
                 }));
-                const endWeek = getSaturdayWeekId(new Date(endTime));
-                const endDay = localDateKey(new Date(endTime));
+                const endWeek = getSaturdayWeekId(new Date(finalEndTime));
+                const endDay = localDateKey(new Date(finalEndTime));
                 updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftStart`] = startTime;
-                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftEnd`] = endTime;
-                updates[`weeklyRecords/${endWeek}/${driverName}/days/${endDay}/endTime`] = endTime;
+                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftEnd`] = finalEndTime;
+                updates[`weeklyRecords/${endWeek}/${driverName}/days/${endDay}/endTime`] = finalEndTime;
+                updates[`activeShifts/${carId}`] = null;
                 return db.ref().update(updates).then(() => {
                     delete adminShiftStartTimes[driverName];
                     alert(`تم إنهاء وردية السائق (${driverName}) وتوزيع ساعاتها على الأيام والأسابيع الصحيحة.`);
@@ -750,7 +759,7 @@
                 Object.keys(window.appState.activeShifts).forEach(carId => {
                     let val = window.appState.activeShifts[carId];
                     let drv = (typeof val === 'object' && val !== null) ? val.driver : val;
-                    if (drv === d.name) {
+                    if (drv === d.name && String(carId) === String(d.carId) && (!val || typeof val !== 'object' || !val.shift || val.shift === d.shift)) {
                         isOnDuty = true;
                         activeCarId = carId;
                     }
@@ -799,7 +808,7 @@
                 if (endShiftBtnEl) {
                     if (isOnDuty && activeCarId) {
                         endShiftBtnEl.style.display = 'inline-flex';
-                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${Number(activeCarId)}, ${inlineArg(d.name)})`);
+                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${inlineArg(String(activeCarId))}, ${inlineArg(d.name)})`);
                     } else {
                         endShiftBtnEl.style.display = 'none';
                     }
