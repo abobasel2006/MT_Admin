@@ -1135,6 +1135,28 @@
             });
         }
 
+        function getAdminOperationKey(fingerprint) {
+            return `mt_admin_pending_operation_${encodeURIComponent(fingerprint)}`;
+        }
+
+        function getOrCreateAdminOperationId(fingerprint) {
+            const storageKey = getAdminOperationKey(fingerprint);
+            try {
+                const existingId = localStorage.getItem(storageKey);
+                if (existingId) return { id: existingId, storageKey };
+                const newId = `admin-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                localStorage.setItem(storageKey, newId);
+                return { id: newId, storageKey };
+            } catch (_) {
+                return { id: `admin-${Date.now()}-${Math.random().toString(36).slice(2)}`, storageKey: null };
+            }
+        }
+
+        function clearAdminOperationId(operation) {
+            if (!operation || !operation.storageKey) return;
+            try { localStorage.removeItem(operation.storageKey); } catch (_) {}
+        }
+
         window.adminAddTransaction = function(e) {
             e.preventDefault();
             const driverName = document.getElementById('adminDriverSelect').value;
@@ -1144,20 +1166,40 @@
             const weekId = getSaturdayWeekId();
             if (!getAllDrivers().some(driver => driver.name === driverName)) return alert('السائق المحدد غير موجود في الأسطول الحالي.');
             if (!['hours', 'deduct_hours', 'reward', 'advance', 'custom_rate'].includes(actionType)) return alert('نوع العملية غير صالح.');
+
+            // Reuse the same ID for an identical pending submission and retries after an ambiguous network result.
+            const fingerprint = JSON.stringify([weekId, driverName, actionType, amount]);
+            const operation = getOrCreateAdminOperationId(fingerprint);
+            let alreadyProcessed = false;
+
             db.ref(`weeklyRecords/${weekId}/${driverName}`).transaction(rec => {
                 rec = rec || { hours: 0, advances: 0, rewards: 0, days: {} };
+                const processedIds = rec.processedAdminOperationIds || {};
+                if (processedIds[operation.id]) {
+                    alreadyProcessed = true;
+                    return rec;
+                }
+
                 if (actionType === 'hours') { rec.hours = (Number(rec.hours) || 0) + amount; rec.todayHours = (Number(rec.todayHours) || 0) + amount; }
                 else if (actionType === 'deduct_hours') { rec.hours = Math.max(0, (Number(rec.hours) || 0) - amount); rec.todayHours = Math.max(0, (Number(rec.todayHours) || 0) - amount); }
                 else if (actionType === 'reward') rec.rewards = (Number(rec.rewards) || 0) + amount;
                 else if (actionType === 'advance') rec.advances = (Number(rec.advances) || 0) + amount;
                 else if (actionType === 'custom_rate') rec.customHourlyRate = amount;
+
+                rec.processedAdminOperationIds = { ...processedIds, [operation.id]: true };
                 return rec;
             }).then(result => {
                 if (!result.committed) return alert('لم يتم تنفيذ العملية.');
+                clearAdminOperationId(operation);
                 document.getElementById('adminAmount').value = '';
-                alert('تم تنفيذ العملية وتحديث السجل بنجاح.');
-            }).catch(err => alert('تعذر تنفيذ العملية: ' + err.message));
-        }
+                alert(alreadyProcessed
+                    ? 'هذه العملية سبق تنفيذها؛ لم تتم إضافة المبلغ أو الساعات مرة أخرى.'
+                    : 'تم تنفيذ العملية وتحديث السجل بنجاح.');
+            }).catch(err => {
+                // Keep the ID after an ambiguous failure so retrying cannot apply the adjustment twice.
+                alert('تعذر تأكيد نتيجة العملية: ' + err.message + '. أعد المحاولة بالقيم نفسها للتحقق دون تكرار الإضافة.');
+            });
+        };
 
         function renderWeekSelector() {
             const selector = document.getElementById('weekSelector');
