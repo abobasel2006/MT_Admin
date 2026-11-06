@@ -383,6 +383,10 @@
             return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
         }
 
+        function inlineArg(value) {
+            return escapeHtml(JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026'));
+        }
+
         function formatTime(timestamp) {
             if (!timestamp) return '--:--';
             const date = new Date(timestamp);
@@ -715,13 +719,13 @@
                     <div class="fin-row" style="margin-bottom: 8px;">
                         <div class="fin-row-top">
                             <div>
-                                <span class="d-name">${shift.driver}</span>
+                                <span class="d-name">${escapeHtml(shift.driver)}</span>
                                 <span class="status-pill status-on">🟢 في وردية نشطة</span>
-                                <span class="d-car">(سيارة: ${shift.car})</span>
+                                <span class="d-car">(سيارة: ${escapeHtml(shift.car)})</span>
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
                                 <span class="live-timer-badge">⏱️ ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}</span>
-                                <button class="btn-end-shift" onclick="adminEndShift(${carId}, '${shift.driver}')">🛑 إنهاء الوردية</button>
+                                <button class="btn-end-shift" onclick="adminEndShift(${Number(carId)}, ${inlineArg(shift.driver)})">🛑 إنهاء الوردية</button>
                             </div>
                         </div>
                         <p style="font-size: 10px; color: var(--text-sub);">وقت البدء: ${formatDateTime(startTime)}</p>
@@ -795,7 +799,7 @@
                 if (endShiftBtnEl) {
                     if (isOnDuty && activeCarId) {
                         endShiftBtnEl.style.display = 'inline-flex';
-                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${activeCarId}, '${d.name}')`);
+                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${Number(activeCarId)}, ${inlineArg(d.name)})`);
                     } else {
                         endShiftBtnEl.style.display = 'none';
                     }
@@ -874,8 +878,8 @@
                 <div class="card" style="margin-bottom:0;">
                     <div class="card-header">
                         <div>
-                            <span style="background:rgba(245,158,11,0.2); color:var(--accent-amber); font-weight:800; font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid rgba(245,158,11,0.3);">${car.plate}</span>
-                            <h3 style="font-size:13px; font-weight:800; margin-top:4px;">${car.model}</h3>
+                            <span style="background:rgba(245,158,11,0.2); color:var(--accent-amber); font-weight:800; font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid rgba(245,158,11,0.3);">${escapeHtml(car.plate)}</span>
+                            <h3 style="font-size:13px; font-weight:800; margin-top:4px;">${escapeHtml(car.model)}</h3>
                         </div>
                         <div>
                             <button onclick="editCar(${car.id})" style="background:transparent; border:none; color:var(--text-sub); font-size:12px; cursor:pointer; margin-left:6px;">✏️</button>
@@ -1002,6 +1006,8 @@
             const amount = Number(document.getElementById('adminAmount').value) || 0;
             if (!driverName || !Number.isFinite(amount) || amount <= 0) return alert('تحقق من اختيار السائق والقيمة.');
             const weekId = getSaturdayWeekId();
+            if (!getAllDrivers().some(driver => driver.name === driverName)) return alert('السائق المحدد غير موجود في الأسطول الحالي.');
+            if (!['hours', 'deduct_hours', 'reward', 'advance', 'custom_rate'].includes(actionType)) return alert('نوع العملية غير صالح.');
             db.ref(`weeklyRecords/${weekId}/${driverName}`).transaction(rec => {
                 rec = rec || { hours: 0, advances: 0, rewards: 0, days: {} };
                 if (actionType === 'hours') { rec.hours = (Number(rec.hours) || 0) + amount; rec.todayHours = (Number(rec.todayHours) || 0) + amount; }
@@ -1116,9 +1122,9 @@
                     <div class="fin-row">
                         <div class="fin-row-top">
                             <div>
-                                <span class="d-name">${d.name}</span>
+                                <span class="d-name">${escapeHtml(d.name)}</span>
                                 <span id="${statusId}" class="status-pill status-off">⚪ في استراحة</span>
-                                <span class="d-car">(${d.car} - ${d.shift})</span>
+                                <span class="d-car">(${escapeHtml(d.car)} - ${escapeHtml(d.shift)})</span>
                                 ${rec.customHourlyRate ? `<span style="font-size:9px; color:var(--accent-amber); background:rgba(245,158,11,0.2); padding:2px 6px; border-radius:4px; margin-right:4px;">أجر خصيص: ${Number(rec.customHourlyRate).toLocaleString()} ل.س</span>` : ''}
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
@@ -1133,9 +1139,9 @@
                         </div>
 
                         <div class="weekly-sched-container">
-                            <button onclick="toggleDropdown('${dropdownId}')" class="dropdown-toggle-btn">
+                            <button onclick="toggleDropdown(${inlineArg(dropdownId)})" class="dropdown-toggle-btn">
                                 <span>📅 جدول الدوام والحضور الأسبوعي (اضغط للعرض/الإخفاء)</span>
-                                <span style="font-size:10px; color:var(--accent-indigo);" onclick="event.stopPropagation(); openAttendanceModal('${d.name}')">✏️ تعديل الحضور</span>
+                                <span style="font-size:10px; color:var(--accent-indigo);" onclick="event.stopPropagation(); openAttendanceModal(${inlineArg(d.name)})">✏️ تعديل الحضور</span>
                             </button>
                             <div id="${dropdownId}" class="dropdown-content-box">
                                 ${daysRowsHtml}
@@ -1147,7 +1153,7 @@
                             <div class="admin-notes-box">${notesHtml}</div>
                             <div style="display:flex; gap:6px; margin-top:4px;">
                                 <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
-                                <button onclick="sendAdminReply('${d.name}')" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
+                                <button onclick="sendAdminReply(${inlineArg(d.name)})" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
                             </div>
                         </div>
 
@@ -1164,7 +1170,7 @@
                                     ${rec.paid ? '✅ تم إرسال الراتب (' + (rec.paidAmount || Math.round(netDue)).toLocaleString() + ' ل.س)' : '⏳ الراتب بانتظار التقبيض'}
                                 </span>
                             </div>
-                            <button onclick="paySalary('${d.name}', ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">
+                            <button onclick="paySalary(${inlineArg(d.name)}, ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">
                                 ${rec.paid ? 'تم التقبيض' : '💵 تقبيض الراتب'}
                             </button>
                         </div>
