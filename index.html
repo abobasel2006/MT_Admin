@@ -477,6 +477,7 @@
             renderWeeklyFinancialList();
         });
 
+
         window.adminEndShift = function(carId, driverName) {
             if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
             carId = String(carId);
@@ -495,46 +496,12 @@
                 }
                 return { ...current, status: 'finalizing', finalizedBy: 'admin', finalizingAt: Date.now(), finalizationToken, endTime: requestedEndTime };
             }).then(result => {
-                if (!result.committed || result.snapshot.val()?.finalizationToken !== finalizationToken) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن الإنهاء جارٍ من جهاز آخر. إذا بقيت عالقة، أعد المحاولة بعد دقيقتين.');
+                if (!result.committed || result.snapshot.val()?.finalizationToken !== finalizationToken) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن الإنهاء جارٍ من جهاز آخر. أعد المحاولة لاحقاً إذا بقيت عالقة.');
                 const finalShift = result.snapshot.val();
-                if (!finalShift || finalShift.finalizedBy !== 'admin') return alert('يجري إنهاء الوردية من جهة أخرى. لم يتم إجراء أي تعديل.');
+                if (!finalShift || finalShift.finalizedBy !== 'admin') throw new Error('يجري إنهاء الوردية من جهة أخرى.');
                 const finalEndTime = Number(finalShift.endTime);
                 if (!finalEndTime || finalEndTime <= startTime) throw new Error('وقت إنهاء الوردية غير صالح.');
-                const totals = {};
-                let cursor = startTime;
-                while (cursor < finalEndTime) {
-                    const day = new Date(cursor);
-                    const nextDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-                    const segmentEnd = Math.min(finalEndTime, nextDay);
-                    const week = getSaturdayWeekId(new Date(cursor));
-                    const dayKey = localDateKey(new Date(cursor));
-                    if (!totals[week]) totals[week] = {};
-                    totals[week][dayKey] = (totals[week][dayKey] || 0) + (segmentEnd - cursor) / 3600000;
-                    cursor = segmentEnd;
-                }
-                const updates = {};
-                Object.entries(totals).forEach(([week, days]) => Object.entries(days).forEach(([dayKey, hours]) => {
-                    updates[`weeklyRecords/${week}/${driverName}/hours`] = firebase.database.ServerValue.increment(hours);
-                    if (dayKey === localDateKey(new Date(finalEndTime))) updates[`weeklyRecords/${week}/${driverName}/todayHours`] = firebase.database.ServerValue.increment(hours);
-                    const dayStart = new Date(dayKey + 'T00:00:00');
-                    const nextMidnight = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1).getTime();
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/hours`] = hours;
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/status`] = 'present';
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/endTime`] = Math.min(finalEndTime, nextMidnight);
-                    if (dayKey === localDateKey(new Date(startTime))) {
-                        updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/startTime`] = startTime;
-                        if (finalShift.odoStartImg) updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/odoStartImg`] = finalShift.odoStartImg;
-                        updates[`weeklyRecords/${week}/${driverName}/odoStartImg`] = finalShift.odoStartImg || '';
-                        updates[`weeklyRecords/${week}/${driverName}/odoStartTimestamp`] = startTime;
-                    }
-                }));
-                const endWeek = getSaturdayWeekId(new Date(finalEndTime));
-                const endDay = localDateKey(new Date(finalEndTime));
-                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftStart`] = startTime;
-                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftEnd`] = finalEndTime;
-                updates[`weeklyRecords/${endWeek}/${driverName}/days/${endDay}/endTime`] = finalEndTime;
-                updates[`activeShifts/${carId}`] = null;
-                return db.ref().update(updates).then(() => {
+                return applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, finalShift, false).then(() => {
                     delete adminShiftStartTimes[driverName];
                     alert(`تم إنهاء وردية السائق (${driverName}) وتوزيع ساعاتها على الأيام والأسابيع الصحيحة.`);
                 });
@@ -560,22 +527,42 @@
             }
         }
 
+
         window.approveAdvance = function(weekId, requestId) {
             const requestRef = db.ref(`pendingAdvances/${weekId}/${requestId}`);
             requestRef.transaction(current => {
                 if (!current || !['pending', 'approving'].includes(current.status)) return;
                 return { ...current, status: 'approving', reviewedAt: current.reviewedAt || Date.now() };
             }).then(result => {
-                if (!result.committed) return alert('هذا الطلب تمت معالجته مسبقاً أو لم يعد متاحاً.');
+                if (!result.committed) {
+                    const existing = result.snapshot && result.snapshot.val();
+                    if (existing && existing.status === 'approved') return alert('هذا الطلب معتمد مسبقاً.');
+                    return alert('هذا الطلب تمت معالجته مسبقاً أو لم يعد متاحاً.');
+                }
                 const req = result.snapshot.val();
                 const amount = Number(req.amount);
                 if (!req.driver || !Number.isFinite(amount) || amount <= 0) throw new Error('بيانات طلب السلفة غير صحيحة.');
-                const updates = {};
-                updates[`weeklyRecords/${weekId}/${req.driver}/advances`] = firebase.database.ServerValue.increment(amount);
-                updates[`pendingAdvances/${weekId}/${requestId}/status`] = 'approved';
-                updates[`pendingAdvances/${weekId}/${requestId}/approvedAt`] = Date.now();
-                return db.ref().update(updates).then(() => alert(`تمت الموافقة على سلفة ${req.driver} بقيمة ${amount.toLocaleString()} ل.س.`));
-            }).catch(err => alert('تعذرت الموافقة. إذا بقي الطلب بحالة «قيد الاعتماد»، أعد محاولة الاعتماد من لوحة الإدارة: ' + err.message));
+                const driverRef = db.ref(`weeklyRecords/${weekId}/${req.driver}`);
+                return driverRef.transaction(current => {
+                    const record = current || {};
+                    const processed = record.processedAdvanceRequestIds || {};
+                    if (processed[requestId]) return;
+                    return {
+                        ...record,
+                        advances: (Number(record.advances) || 0) + amount,
+                        processedAdvanceRequestIds: { ...processed, [requestId]: true }
+                    };
+                }).then(ledgerResult => {
+                    if (!ledgerResult.committed) {
+                        const saved = ledgerResult.snapshot && ledgerResult.snapshot.val();
+                        if (!saved || !saved.processedAdvanceRequestIds || saved.processedAdvanceRequestIds[requestId] !== true) {
+                            throw new Error('تعذر تثبيت أثر السلفة في سجل السائق.');
+                        }
+                    }
+                    return requestRef.update({ status: 'approved', approvedAt: Date.now() })
+                        .then(() => alert(`تمت الموافقة على سلفة ${req.driver} بقيمة ${amount.toLocaleString()} ل.س.`));
+                });
+            }).catch(err => alert('تعذرت الموافقة. يمكنك إعادة المحاولة بأمان؛ لن تُضاف السلفة مرتين: ' + err.message));
         };
 
         window.rejectAdvance = function(weekId, requestId) {
