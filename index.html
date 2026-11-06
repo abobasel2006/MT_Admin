@@ -481,7 +481,8 @@
         // Apply a shift's financial effect once per week. The marker and totals
         // are committed in the same transaction, so retries cannot add hours twice.
         async function applyShiftHoursOnce(driverName, carId, startTime, endTime, shiftData, includeEndOdometer) {
-            const shiftId = 'shift_' + String(carId).replaceAll('.', '_').replaceAll('#', '_').replaceAll(' + '_' + startTime;
+            const safeCarId = String(carId).split('').map(ch => '.#$ /[]'.includes(ch) ? '_' : ch).join('');
+            const shiftId = 'shift_' + safeCarId + '_' + startTime;
             const totals = {};
             let cursor = startTime;
             while (cursor < endTime) {
