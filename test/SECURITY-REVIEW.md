@@ -14,11 +14,11 @@ Branch: security/no-auth-boundary-review-2026-11
 2. **Critical — broad database reads.** The page subscribes to the complete `cars`, `notes`, `weeklyRecords`, `pendingAdvances`, and `activeShifts` paths. Actual exposure is determined by the deployed Realtime Database rules.
 3. **Critical — privileged writes originate in the browser.** The page writes the hourly rate, payment fields, attendance status, notes, car records, weekly settlement updates, and shift finalization directly to Realtime Database.
 4. **High — UI visibility is not authorization.** Hiding controls or relying on an unlisted URL does not prevent direct requests to Firebase.
-5. **Medium — retry/duplicate risk remains for some manual financial actions.** Existing transaction/idempotency protections cover important shift and advance flows, but not every manual payment or settlement write has a durable idempotency key.
+5. **Medium — some manual financial writes were not idempotent in the original test copy.** The isolated test branch now adds an idempotency marker to `adminAddTransaction` for identical pending submissions and retries. This is a data-integrity improvement, not an authorization control; it relies on browser storage to reuse the pending operation ID.
 
 ## Confirmed code paths in the reviewed test copy
 - Reads: `settings/hourlyRate`, `cars`, `notes`, `weeklyRecords`, `pendingAdvances`, `activeShifts`.
-- Writes: `settings/hourlyRate`; payment fields under `weeklyRecords`; attendance status; notes; full `cars` writes; weekly record transaction; root multi-location settlement update.
+- Writes: `settings/hourlyRate`; payment fields under `weeklyRecords`; attendance status; notes; full `cars` writes; weekly record transaction; root multi-location settlement update. The isolated test branch now records `processedAdminOperationIds/{operationId}` in the same weekly-record transaction for manual adjustments.
 - Inline JavaScript syntax check: passed (1 inline script block).
 
 ## What can be improved without changing the driver login
@@ -39,4 +39,4 @@ The owner-provided Firebase Console screenshot showed root-level `.read` and `.w
 1. Keep production rules untouched until a separate test Firebase project is configured.
 2. Test every read/write path against that isolated project or the Firebase Emulator.
 3. Prepare candidate validation rules only for the test environment, documenting that they cannot grant admin-only permissions without authentication.
-4. Add idempotency to manual financial operations in the test branch before any release consideration.
+4. Validate the new `adminAddTransaction` idempotency flow with concurrent submissions and simulated lost responses against an isolated test database before any release consideration.
