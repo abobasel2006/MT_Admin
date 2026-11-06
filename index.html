@@ -690,7 +690,7 @@
         };
 
         window.sendAdminReply = function(driverName) {
-            const inputEl = document.getElementById(`reply_input_${driverName.replace(/\s+/g, '_')}`);
+            const inputEl = document.getElementById(`reply_input_${encodeURIComponent(String(driverName))}`);
             if (!inputEl) return;
             const text = inputEl.value.trim();
             if (!text) return;
@@ -733,8 +733,8 @@
             const targetCarId = Number(document.getElementById('transTargetCarSelect').value);
             const targetShiftType = document.getElementById('transTargetShiftSelect').value;
 
-            const oldCar = window.appState.cars.find(c => c.id === oldCarId);
-            const targetCar = window.appState.cars.find(c => c.id === targetCarId);
+            const oldCar = window.appState.cars.find(c => String(c.id) === String(oldCarId));
+            const targetCar = window.appState.cars.find(c => String(c.id) === String(targetCarId));
 
             if (!oldCar || !targetCar) {
                 alert("خطأ في تحديد السيارات.");
@@ -1265,7 +1265,7 @@
                             <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والدردشة</div>
                             <div class="admin-notes-box">${notesHtml}</div>
                             <div style="display:flex; gap:6px; margin-top:4px;">
-                                <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
+                                <input type="text" id="reply_input_${safeDriverId}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
                                 <button onclick="sendAdminReply(${inlineArg(d.name)})" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
                             </div>
                         </div>
