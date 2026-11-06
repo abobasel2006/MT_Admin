@@ -498,6 +498,7 @@
 
             const endWeek = getSaturdayWeekId(new Date(endTime));
             const endDay = localDateKey(new Date(endTime));
+            if (!totals[endWeek]) totals[endWeek] = {};
             await Promise.all(Object.entries(totals).map(([weekId, days]) => {
                 const recordRef = db.ref(`weeklyRecords/${weekId}/${driverName}`);
                 return recordRef.transaction(current => {
@@ -524,6 +525,12 @@
                         if (includeEndOdometer && dayKey === endDay && shiftData.endOdoImg) dayRecord.odoEndImg = shiftData.endOdoImg;
                         next.days[dayKey] = dayRecord;
                     });
+                    if (!next.days[endDay]) {
+                        const endingDay = { ...(next.days[endDay] || {}) };
+                        endingDay.endTime = endTime;
+                        if (includeEndOdometer && shiftData.endOdoImg) endingDay.odoEndImg = shiftData.endOdoImg;
+                        next.days[endDay] = endingDay;
+                    }
                     if (Object.prototype.hasOwnProperty.call(days, localDateKey(new Date(startTime)))) {
                         next.odoStartImg = shiftData.odoStartImg || '';
                         next.odoStartTimestamp = startTime;
