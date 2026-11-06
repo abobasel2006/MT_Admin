@@ -379,6 +379,10 @@
         }
         setInterval(measureConnectionLatency, 5000);
 
+        function escapeHtml(value) {
+            return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+        }
+
         function formatTime(timestamp) {
             if (!timestamp) return '--:--';
             const date = new Date(timestamp);
@@ -388,6 +392,11 @@
         function formatDateTime(timestamp) {
             if (!timestamp) return 'غير متوفر';
             return new Date(timestamp).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'medium' });
+        }
+
+        function localDateKey(dateObj = new Date()) {
+            const d = new Date(dateObj);
+            return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         }
 
         function getSaturdayWeekId(dateObj = new Date()) {
@@ -417,7 +426,7 @@
             cars: JSON.parse(localStorage.getItem('mt_admin_cars') || '[]'),
             weeklyRecords: JSON.parse(localStorage.getItem('mt_admin_records') || '{}'),
             activeShifts: JSON.parse(localStorage.getItem('mt_admin_shifts') || '{}'),
-            pendingAdvances: JSON.parse(localStorage.getItem('mt_admin_pending_adv') || '{}'),
+            pendingAdvances: {},
             driverNotes: {}
         };
 
@@ -444,28 +453,14 @@
         db.ref('weeklyRecords').on('value', (snapshot) => {
             const remoteRecords = snapshot.val() || {};
             const weekId = window.currentActiveWeek;
-            if (remoteRecords[weekId]) {
-                Object.keys(remoteRecords[weekId]).forEach(driverName => {
-                    const remoteRec = remoteRecords[weekId][driverName];
-                    const localRec = (window.appState.weeklyRecords[weekId] && window.appState.weeklyRecords[weekId][driverName]) || { advances: 0 };
-                    
-                    if (remoteRec.advances > localRec.advances) {
-                        const diff = remoteRec.advances - localRec.advances;
-                        remoteRec.advances = localRec.advances;
-                        
-                        if (!window.appState.pendingAdvances[weekId]) window.appState.pendingAdvances[weekId] = {};
-                        window.appState.pendingAdvances[weekId][driverName] = {
-                            amount: diff,
-                            timestamp: Date.now()
-                        };
-                        localStorage.setItem('mt_admin_pending_adv', JSON.stringify(window.appState.pendingAdvances));
-                    }
-                });
-            }
-
             window.appState.weeklyRecords = remoteRecords;
             localStorage.setItem('mt_admin_records', JSON.stringify(window.appState.weeklyRecords));
             renderWeeklyFinancialList();
+            renderAdvanceNotifications();
+        });
+
+        db.ref('pendingAdvances').on('value', (snapshot) => {
+            window.appState.pendingAdvances = snapshot.val() || {};
             renderAdvanceNotifications();
         });
 
@@ -479,44 +474,47 @@
         });
 
         window.adminEndShift = function(carId, driverName) {
-            if (confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) {
-                const weekId = getSaturdayWeekId();
-                const shiftData = window.appState.activeShifts[carId];
-                const endTime = Date.now();
-                
-                let elapsedHours = 0;
-                let startTime = Date.now();
-                if (shiftData) {
-                    startTime = (typeof shiftData === 'object' && shiftData !== null) ? shiftData.timestamp : (adminShiftStartTimes[driverName] || Date.now());
-                    let diffSecs = Math.max(0, Math.floor((endTime - startTime) / 1000));
-                    elapsedHours = diffSecs / 3600;
+            if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
+            const cachedShift = window.appState.activeShifts[String(carId)] || window.appState.activeShifts[carId] || {};
+            const startTime = Number(cachedShift.timestamp || adminShiftStartTimes[driverName]);
+            if (!startTime) return alert('تعذر تحديد وقت بدء الوردية. لم يتم إجراء أي تغيير.');
+            const endTime = Date.now();
+            const shiftRef = db.ref(`activeShifts/${carId}`);
+            shiftRef.transaction(current => {
+                if (!current || current.driver !== driverName || Number(current.timestamp) !== startTime) return;
+                return null;
+            }).then(result => {
+                if (!result.committed) return alert('لم تعد هناك وردية نشطة مطابقة. ربما أنهاها السائق بالفعل.');
+                const totals = {};
+                let cursor = startTime;
+                while (cursor < endTime) {
+                    const day = new Date(cursor);
+                    const nextDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+                    const segmentEnd = Math.min(endTime, nextDay);
+                    const week = getSaturdayWeekId(new Date(cursor));
+                    const dayKey = localDateKey(new Date(cursor));
+                    if (!totals[week]) totals[week] = {};
+                    totals[week][dayKey] = (totals[week][dayKey] || 0) + (segmentEnd - cursor) / 3600000;
+                    cursor = segmentEnd;
                 }
-
-                if (!window.appState.weeklyRecords[weekId]) window.appState.weeklyRecords[weekId] = {};
-                if (!window.appState.weeklyRecords[weekId][driverName]) {
-                    window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0, todayHours: 0, days: {} };
-                }
-
-                const driverRec = window.appState.weeklyRecords[weekId][driverName];
-                driverRec.hours = (driverRec.hours || 0) + elapsedHours;
-                driverRec.todayHours = (driverRec.todayHours || 0) + elapsedHours;
-                driverRec.lastShiftStart = startTime;
-                driverRec.lastShiftEnd = endTime;
-
-                const dateKey = new Date().toISOString().split('T')[0];
-                if (!driverRec.days) driverRec.days = {};
-                if (!driverRec.days[dateKey]) driverRec.days[dateKey] = {};
-                driverRec.days[dateKey].endTime = endTime;
-                driverRec.days[dateKey].status = 'present';
-
                 const updates = {};
-                updates[`activeShifts/${carId}`] = null;
-                db.ref().update(updates);
-                db.ref('weeklyRecords').set(window.appState.weeklyRecords);
-
-                delete adminShiftStartTimes[driverName];
-                alert(`✅ تم إنهاء وردية السائق (${driverName}) بنجاح وإضافة ساعات العمل لرصيده.`);
-            }
+                Object.entries(totals).forEach(([week, days]) => Object.entries(days).forEach(([dayKey, hours]) => {
+                    updates[`weeklyRecords/${week}/${driverName}/hours`] = firebase.database.ServerValue.increment(hours);
+                    if (dayKey === localDateKey(new Date(endTime))) updates[`weeklyRecords/${week}/${driverName}/todayHours`] = firebase.database.ServerValue.increment(hours);
+                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/hours`] = hours;
+                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/status`] = 'present';
+                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/endTime`] = Math.min(endTime, new Date(new Date(dayKey + 'T00:00:00').getFullYear(), new Date(dayKey + 'T00:00:00').getMonth(), new Date(dayKey + 'T00:00:00').getDate() + 1).getTime());
+                }));
+                const endWeek = getSaturdayWeekId(new Date(endTime));
+                const endDay = localDateKey(new Date(endTime));
+                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftStart`] = startTime;
+                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftEnd`] = endTime;
+                updates[`weeklyRecords/${endWeek}/${driverName}/days/${endDay}/endTime`] = endTime;
+                return db.ref().update(updates).then(() => {
+                    delete adminShiftStartTimes[driverName];
+                    alert(`تم إنهاء وردية السائق (${driverName}) وتوزيع ساعاتها على الأيام والأسابيع الصحيحة.`);
+                });
+            }).catch(err => alert('تعذر إنهاء الوردية: ' + err.message));
         }
 
         window.paySalary = function(driverName, amount) {
@@ -531,43 +529,41 @@
                     window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0 };
                 }
 
-                window.appState.weeklyRecords[weekId][driverName].paid = true;
-                window.appState.weeklyRecords[weekId][driverName].paidAmount = amount;
-
-                db.ref('weeklyRecords').set(window.appState.weeklyRecords);
-                renderWeeklyFinancialList();
-                alert(`✅ تم إرسال الراتب إلى الموظف (${driverName}) بمبلغ ${amount.toLocaleString()} ل.س بنجاح!`);
+                db.ref(`weeklyRecords/${weekId}/${driverName}`).update({ paid: true, paidAmount: amount }).then(() => {
+                    renderWeeklyFinancialList();
+                    alert(`تم تسجيل تقبيض (${driverName}) بمبلغ ${amount.toLocaleString()} ل.س.`);
+                }).catch(err => alert('تعذر تسجيل الدفع: ' + err.message));
             }
         }
 
-        window.approveAdvance = function(driverName, amount) {
-            const weekId = window.currentActiveWeek;
-            if (!window.appState.weeklyRecords[weekId]) window.appState.weeklyRecords[weekId] = {};
-            if (!window.appState.weeklyRecords[weekId][driverName]) {
-                window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0 };
-            }
-            window.appState.weeklyRecords[weekId][driverName].advances += amount;
-            
-            if (window.appState.pendingAdvances[weekId]) {
-                delete window.appState.pendingAdvances[weekId][driverName];
-                localStorage.setItem('mt_admin_pending_adv', JSON.stringify(window.appState.pendingAdvances));
-            }
+        window.approveAdvance = function(weekId, requestId) {
+            const requestRef = db.ref(`pendingAdvances/${weekId}/${requestId}`);
+            requestRef.transaction(current => {
+                if (!current || !['pending', 'approving'].includes(current.status)) return;
+                return { ...current, status: 'approving', reviewedAt: current.reviewedAt || Date.now() };
+            }).then(result => {
+                if (!result.committed) return alert('هذا الطلب تمت معالجته مسبقاً أو لم يعد متاحاً.');
+                const req = result.snapshot.val();
+                const amount = Number(req.amount);
+                if (!req.driver || !Number.isFinite(amount) || amount <= 0) throw new Error('بيانات طلب السلفة غير صحيحة.');
+                const updates = {};
+                updates[`weeklyRecords/${weekId}/${req.driver}/advances`] = firebase.database.ServerValue.increment(amount);
+                updates[`pendingAdvances/${weekId}/${requestId}/status`] = 'approved';
+                updates[`pendingAdvances/${weekId}/${requestId}/approvedAt`] = Date.now();
+                return db.ref().update(updates).then(() => alert(`تمت الموافقة على سلفة ${req.driver} بقيمة ${amount.toLocaleString()} ل.س.`));
+            }).catch(err => alert('تعذرت الموافقة. إذا بقي الطلب بحالة «قيد الاعتماد»، أعد محاولة الاعتماد من لوحة الإدارة: ' + err.message));
+        };
 
-            db.ref('weeklyRecords').set(window.appState.weeklyRecords);
-            renderAdvanceNotifications();
-            renderWeeklyFinancialList();
-            alert(`✅ تم قبول سلفة السائق (${driverName}) بمبلغ ${amount.toLocaleString()} ل.س`);
-        }
-
-        window.rejectAdvance = function(driverName) {
-            const weekId = window.currentActiveWeek;
-            if (window.appState.pendingAdvances[weekId]) {
-                delete window.appState.pendingAdvances[weekId][driverName];
-                localStorage.setItem('mt_admin_pending_adv', JSON.stringify(window.appState.pendingAdvances));
-            }
-            renderAdvanceNotifications();
-            alert(`❌ تم رفض طلب السلفة للسائق (${driverName})`);
-        }
+        window.rejectAdvance = function(weekId, requestId) {
+            const requestRef = db.ref(`pendingAdvances/${weekId}/${requestId}`);
+            requestRef.transaction(current => {
+                if (!current || current.status !== 'pending') return;
+                return { ...current, status: 'rejected', reviewedAt: Date.now() };
+            }).then(result => {
+                if (!result.committed) return alert('هذا الطلب لم يعد معلقاً أو تمت معالجته مسبقاً.');
+                alert('تم رفض طلب السلفة وتسجيل القرار.');
+            }).catch(err => alert('تعذر رفض الطلب: ' + err.message));
+        };
 
         window.openAttendanceModal = function(driverName) {
             document.getElementById('attDriverName').value = driverName;
@@ -674,36 +670,24 @@
             const listEl = document.getElementById('advCardsList');
             const countBadge = document.getElementById('advCountBadge');
             if (!container || !listEl) return;
-            
             const weekId = window.currentActiveWeek;
-            const pendings = (window.appState.pendingAdvances && window.appState.pendingAdvances[weekId]) ? window.appState.pendingAdvances[weekId] : {};
-            const drivers = Object.keys(pendings);
-
-            if (drivers.length === 0) {
-                container.style.display = 'none';
-                listEl.innerHTML = '';
-                return;
-            }
-
-            container.style.display = 'block';
-            countBadge.innerText = drivers.length;
-
-            listEl.innerHTML = drivers.map(drv => {
-                const req = pendings[drv];
-                return `
-                    <div class="adv-alert-card">
-                        <div class="adv-alert-top">
-                            <span style="font-size:11px; font-weight:800; color:var(--accent-red);">السائق: ${drv}</span>
-                            <span style="font-size:12px; font-weight:800; color:#fff;">${req.amount.toLocaleString()} ل.س</span>
-                        </div>
-                        <p style="font-size:10px; margin-bottom:6px; color:var(--text-sub);">يطلب سلفة مالية أسبوعية.</p>
-                        <div class="adv-actions">
-                            <button onclick="approveAdvance('${drv}', ${req.amount})" class="btn-approve">✅ موافقة واعتماد</button>
-                            <button onclick="rejectAdvance('${drv}')" class="btn-reject">❌ رفض</button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
+            const requests = window.appState.pendingAdvances?.[weekId] || {};
+            const pending = Object.entries(requests).filter(([, req]) => req && ['pending', 'approving'].includes(req.status));
+            container.style.display = pending.length ? 'block' : 'none';
+            countBadge.textContent = String(pending.length);
+            listEl.replaceChildren();
+            pending.forEach(([requestId, req]) => {
+                const card = document.createElement('div'); card.className = 'adv-alert-card';
+                const top = document.createElement('div'); top.className = 'adv-alert-top';
+                const driver = document.createElement('span'); driver.style.cssText = 'font-size:11px;font-weight:800;color:var(--accent-red);'; driver.textContent = 'السائق: ' + String(req.driver || 'غير معروف');
+                const amount = document.createElement('span'); amount.style.cssText = 'font-size:12px;font-weight:800;color:#fff;'; amount.textContent = (Number(req.amount) || 0).toLocaleString() + ' ل.س';
+                top.append(driver, amount); card.appendChild(top);
+                const note = document.createElement('p'); note.style.cssText = 'font-size:10px;margin-bottom:6px;color:var(--text-sub);'; note.textContent = 'طلب سلفة مالية أسبوعية.'; card.appendChild(note);
+                const actions = document.createElement('div'); actions.className = 'adv-actions';
+                const approve = document.createElement('button'); approve.className = 'btn-approve'; approve.textContent = req.status === 'approving' ? '↻ استكمال الاعتماد' : '✅ موافقة واعتماد'; approve.addEventListener('click', () => approveAdvance(weekId, requestId));
+                const reject = document.createElement('button'); reject.className = 'btn-reject'; reject.textContent = '❌ رفض'; reject.disabled = req.status === 'approving'; reject.addEventListener('click', () => rejectAdvance(weekId, requestId));
+                actions.append(approve, reject); card.appendChild(actions); listEl.appendChild(card);
+            });
         }
 
         function renderActiveDriversTab() {
@@ -830,7 +814,7 @@
                     } else if (rec.lastShiftStart) {
                         st = rec.lastShiftStart;
                     } else {
-                        const todayKey = new Date().toISOString().split('T')[0];
+                        const todayKey = localDateKey();
                         if (rec.days && rec.days[todayKey] && rec.days[todayKey].startTime) {
                             st = rec.days[todayKey].startTime;
                         }
@@ -845,7 +829,7 @@
                     } else if (rec.lastShiftEnd) {
                         et = formatTime(rec.lastShiftEnd);
                     } else {
-                        const todayKey = new Date().toISOString().split('T')[0];
+                        const todayKey = localDateKey();
                         if (rec.days && rec.days[todayKey] && rec.days[todayKey].endTime) {
                             et = formatTime(rec.days[todayKey].endTime);
                         } else {
@@ -1016,33 +1000,21 @@
             const driverName = document.getElementById('adminDriverSelect').value;
             const actionType = document.getElementById('adminActionType').value;
             const amount = Number(document.getElementById('adminAmount').value) || 0;
-            if (!driverName) return;
-
+            if (!driverName || !Number.isFinite(amount) || amount <= 0) return alert('تحقق من اختيار السائق والقيمة.');
             const weekId = getSaturdayWeekId();
-            if (!window.appState.weeklyRecords[weekId]) window.appState.weeklyRecords[weekId] = {};
-            if (!window.appState.weeklyRecords[weekId][driverName]) {
-                window.appState.weeklyRecords[weekId][driverName] = { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '', days: {} };
-            }
-
-            if (actionType === 'hours') {
-                window.appState.weeklyRecords[weekId][driverName].hours = (window.appState.weeklyRecords[weekId][driverName].hours || 0) + amount;
-                window.appState.weeklyRecords[weekId][driverName].todayHours = (window.appState.weeklyRecords[weekId][driverName].todayHours || 0) + amount;
-            } else if (actionType === 'deduct_hours') {
-                let currentHours = window.appState.weeklyRecords[weekId][driverName].hours || 0;
-                window.appState.weeklyRecords[weekId][driverName].hours = Math.max(0, currentHours - amount);
-                let currentToday = window.appState.weeklyRecords[weekId][driverName].todayHours || 0;
-                window.appState.weeklyRecords[weekId][driverName].todayHours = Math.max(0, currentToday - amount);
-            } else if (actionType === 'reward') {
-                window.appState.weeklyRecords[weekId][driverName].rewards = (window.appState.weeklyRecords[weekId][driverName].rewards || 0) + amount;
-            } else if (actionType === 'advance') {
-                window.appState.weeklyRecords[weekId][driverName].advances = (window.appState.weeklyRecords[weekId][driverName].advances || 0) + amount;
-            } else if (actionType === 'custom_rate') {
-                window.appState.weeklyRecords[weekId][driverName].customHourlyRate = amount;
-            }
-
-            db.ref('weeklyRecords').set(window.appState.weeklyRecords);
-            document.getElementById('adminAmount').value = "";
-            alert('تم تنفيذ العملية وتحديث السائق بنجاح!');
+            db.ref(`weeklyRecords/${weekId}/${driverName}`).transaction(rec => {
+                rec = rec || { hours: 0, advances: 0, rewards: 0, days: {} };
+                if (actionType === 'hours') { rec.hours = (Number(rec.hours) || 0) + amount; rec.todayHours = (Number(rec.todayHours) || 0) + amount; }
+                else if (actionType === 'deduct_hours') { rec.hours = Math.max(0, (Number(rec.hours) || 0) - amount); rec.todayHours = Math.max(0, (Number(rec.todayHours) || 0) - amount); }
+                else if (actionType === 'reward') rec.rewards = (Number(rec.rewards) || 0) + amount;
+                else if (actionType === 'advance') rec.advances = (Number(rec.advances) || 0) + amount;
+                else if (actionType === 'custom_rate') rec.customHourlyRate = amount;
+                return rec;
+            }).then(result => {
+                if (!result.committed) return alert('لم يتم تنفيذ العملية.');
+                document.getElementById('adminAmount').value = '';
+                alert('تم تنفيذ العملية وتحديث السجل بنجاح.');
+            }).catch(err => alert('تعذر تنفيذ العملية: ' + err.message));
         }
 
         function renderWeekSelector() {
@@ -1068,11 +1040,9 @@
         window.clearCurrentWeek = function() {
             if (confirm("هل تريد تصفية هذا الأسبوع؟")) {
                 if (window.appState.weeklyRecords[window.currentActiveWeek]) {
-                    Object.keys(window.appState.weeklyRecords[window.currentActiveWeek]).forEach(d => {
-                        window.appState.weeklyRecords[window.currentActiveWeek][d].settled = true;
-                    });
-                    db.ref('weeklyRecords').set(window.appState.weeklyRecords);
-                    alert("تمت التصفية!");
+                    const updates = {};
+                    Object.keys(window.appState.weeklyRecords[window.currentActiveWeek]).forEach(d => { updates[`weeklyRecords/${window.currentActiveWeek}/${d}/settled`] = true; });
+                    db.ref().update(updates).then(() => alert('تم تسجيل تصفية الأسبوع.')).catch(err => alert('تعذر حفظ التصفية: ' + err.message));
                 }
             }
         }
@@ -1087,7 +1057,7 @@
             }
             const weekData = window.appState.weeklyRecords[window.currentActiveWeek] || {};
             const weekDays = getWeekDaysList(window.currentActiveWeek);
-            const todayStr = new Date().toISOString().split('T')[0];
+            const todayStr = localDateKey();
 
             container.innerHTML = drivers.map(d => {
                 const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '', paid: false, todayHours: 0, days: {} };
@@ -1111,7 +1081,7 @@
                     const dayData = rec.days && rec.days[day.dateKey];
                     let startT = dayData?.startTime ? formatTime(dayData.startTime) : '--:--';
                     let endT = dayData?.endTime ? formatTime(dayData.endTime) : (dayData?.startTime ? 'قيد العمل' : '--:--');
-                    let dayHours = dayData?.startTime && dayData?.endTime ? ((dayData.endTime - dayData.startTime) / 3600000).toFixed(1) + ' س' : (dayData?.startTime ? 'قيد العمل' : '0 س');
+                    let dayHours = Number.isFinite(Number(dayData?.hours)) ? Number(dayData.hours).toFixed(1) + ' س' : (dayData?.startTime && dayData?.endTime ? ((dayData.endTime - dayData.startTime) / 3600000).toFixed(1) + ' س' : (dayData?.startTime ? 'قيد العمل' : '0 س'));
                     
                     let statusLabel = day.dateKey < todayStr ? '❌ غياب' : (day.dateKey === todayStr ? '⏳ اليوم' : '⏳ قادم');
                     let statusColor = 'var(--text-sub)';
@@ -1140,7 +1110,7 @@
                 }).join('');
 
                 const notesArr = Object.values(window.appState.driverNotes[d.name] || {});
-                const notesHtml = notesArr.length > 0 ? notesArr.map(n => `<div class="admin-note-item"><b>${n.sender}:</b> ${n.text}</div>`).join('') : '<p style="color:var(--text-sub); text-align:center;">لا توجد ملاحظات.</p>';
+                const notesHtml = notesArr.length > 0 ? notesArr.map(n => `<div class="admin-note-item"><b>${escapeHtml(n.sender)}:</b> ${escapeHtml(n.text)}</div>`).join('') : '<p style="color:var(--text-sub); text-align:center;">لا توجد ملاحظات.</p>';
 
                 return `
                     <div class="fin-row">
