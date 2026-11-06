@@ -1048,7 +1048,8 @@
             if (duplicatePlate) return alert('رقم اللوحة مستخدم في سجل سيارة آخر. يجب أن تكون اللوحة فريدة.');
             const duplicateDriver = getAllDrivers().some(d => String(d.carId) !== String(editId || '') && assignedNames.includes(d.name));
             if (duplicateDriver) return alert('اسم السائق مسجل مسبقاً في سيارة أخرى. يجب أن يكون لكل سائق اسم مميز لتجنب تداخل السجلات.');
-            if (editId) {
+            if (editId) {            if (window.appState.activeShifts[String(editId)]) return alert('لا يمكن تعديل بيانات السيارة أو سائقيها أثناء وجود وردية نشطة. أنهِ الوردية أولاً.');
+            
                 const car = window.appState.cars.find(c => String(c.id) === String(editId));
                 if (!car) return alert('تعذر العثور على سجل السيارة المطلوب تعديله.');
                 car.plate = plate; car.model = model; car.dayDriver = dayDriver; car.nightDriver = nightDriver;
@@ -1062,6 +1063,7 @@
         }
 
         window.askDeleteCar = function(carId) {
+            if (window.appState.activeShifts[String(carId)]) return alert('لا يمكن حذف سيارة لديها وردية نشطة. أنهِ الوردية أولاً.');
             const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('deleteModalTitle').innerText = "حذف السيارة";
@@ -1074,6 +1076,7 @@
         }
 
         window.askRemoveDriver = function(carId, shiftType) {
+            if (window.appState.activeShifts[String(carId)]) return alert('لا يمكن إزالة سائق من سيارة لديها وردية نشطة. أنهِ الوردية أولاً.');
             const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('deleteModalTitle').innerText = "إزالة السائق";
