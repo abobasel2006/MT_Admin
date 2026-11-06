@@ -634,9 +634,13 @@
             document.getElementById('transDriverDisplay').value = `${driverName} (${shiftType === 'day' ? 'نهاري' : 'ليلي'})`;
 
             const targetSelect = document.getElementById('transTargetCarSelect');
-            targetSelect.innerHTML = window.appState.cars.map(c => `
-                <option value="${c.id}">سيارة: ${c.plate} - ${c.model}</option>
-            `).join('');
+            targetSelect.replaceChildren();
+            window.appState.cars.forEach(c => {
+                const option = document.createElement('option');
+                option.value = String(c.id);
+                option.textContent = `سيارة: ${c.plate} - ${c.model}`;
+                targetSelect.appendChild(option);
+            });
 
             openModal('transferDriverModal');
         };
@@ -1133,8 +1137,8 @@
                                 <div>بدء: <b>${startT}</b></div>
                                 <div>انتهاء: <b>${endT}</b></div>
                                 <div>ساعات اليوم: <b style="color:var(--accent-amber);">${dayHours}</b></div>
-                                <div>عداد البداية: ${dayData?.odoStartImg || rec.odoStartImg ? `<button onclick="showImage('${dayData?.odoStartImg || rec.odoStartImg}', 'صورة عداد البداية (${day.name})', '${formatDateTime(dayData?.startTime || rec.odoStartTimestamp)}') " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
-                                <div>عداد النهاية: ${dayData?.odoEndImg || rec.odoEndImg ? `<button onclick="showImage('${dayData?.odoEndImg || rec.odoEndImg}', 'صورة عداد النهاية (${day.name})', '${formatDateTime(dayData?.endTime || rec.odoEndTimestamp)}') " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد البداية: ${dayData?.odoStartImg || rec.odoStartImg ? `<button onclick="showImage(${inlineArg(dayData?.odoStartImg || rec.odoStartImg)}, ${inlineArg('صورة عداد البداية (' + day.name + ')')}, ${inlineArg(formatDateTime(dayData?.startTime || rec.odoStartTimestamp))}) " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد النهاية: ${dayData?.odoEndImg || rec.odoEndImg ? `<button onclick="showImage(${inlineArg(dayData?.odoEndImg || rec.odoEndImg)}, ${inlineArg('صورة عداد النهاية (' + day.name + ')')}, ${inlineArg(formatDateTime(dayData?.endTime || rec.odoEndTimestamp))}) " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
                             </div>
                         </div>
                     `;
