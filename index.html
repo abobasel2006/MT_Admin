@@ -877,7 +877,7 @@
 
                 const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
                 const liveSalary = totalHours * driverRate;
-                const rewards = rec.rewards || 0;
+                const rewards = Number(rec.rewards) || 0;
                 const netDue = liveSalary + rewards - (rec.advances || 0);
 
                 const timerEl = document.getElementById(`timer_${encodeURIComponent(String(d.name))}`);
@@ -1193,7 +1193,7 @@
                 const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '', paid: false, todayHours: 0, days: {} };
                 const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
                 const initialSalary = (rec.hours || 0) * driverRate;
-                const rewards = rec.rewards || 0;
+                const rewards = Number(rec.rewards) || 0;
                 const netDue = initialSalary + rewards - (rec.advances || 0);
                 
                 const safeDriverId = encodeURIComponent(String(d.name));
@@ -1286,13 +1286,13 @@
                             <div class="fin-box"><p class="lbl">ساعات اليوم</p><p id="${todayHoursId}" class="val val-indigo">0 س</p></div>
                             <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p id="${weekHoursId}" class="val val-amber">0 س</p></div>
                             <div class="fin-box"><p class="lbl">الأجر</p><p id="${salaryId}" class="val val-green">${Math.round(initialSalary).toLocaleString()} ل.س</p></div>
-                            <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
+                            <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(Number(rec.advances) || 0).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">الصافي</p><p id="${netId}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
                         </div>
                         <div class="pay-salary-box">
                             <div>
                                 <span style="font-size:10px; font-weight:700; color:${rec.paid ? 'var(--accent-green)' : 'var(--text-sub)'};">
-                                    ${rec.paid ? '✅ تم إرسال الراتب (' + (rec.paidAmount || Math.round(netDue)).toLocaleString() + ' ل.س)' : '⏳ الراتب بانتظار التقبيض'}
+                                    ${rec.paid ? '✅ تم إرسال الراتب (' + (Number(rec.paidAmount) || Math.round(netDue)).toLocaleString() + ' ل.س)' : '⏳ الراتب بانتظار التقبيض'}
                                 </span>
                             </div>
                             <button onclick="paySalary(${inlineArg(d.name)}, ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">
