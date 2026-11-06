@@ -660,7 +660,9 @@
             document.getElementById('attDriverName').value = driverName;
             document.getElementById('attDriverNameDisplay').value = driverName;
             const weekDays = getWeekDaysList(window.currentActiveWeek);
-            document.getElementById('attDateSelect').innerHTML = weekDays.map(d => `<option value="${d.dateKey}">${d.name} (${d.displayDate})</option>`).join('');
+            const dateSelect = document.getElementById('attDateSelect');
+            dateSelect.replaceChildren();
+            weekDays.forEach(d => dateSelect.appendChild(new Option(`${d.name} (${d.displayDate})`, d.dateKey)));
             openModal('attendanceModal');
         };
 
@@ -816,7 +818,7 @@
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
                                 <span class="live-timer-badge">⏱️ ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}</span>
-                                <button class="btn-end-shift" onclick="adminEndShift(${Number(carId)}, ${inlineArg(shift.driver)})">🛑 إنهاء الوردية</button>
+                                <button class="btn-end-shift" onclick="adminEndShift(${inlineArg(String(carId))}, ${inlineArg(shift.driver)})">🛑 إنهاء الوردية</button>
                             </div>
                         </div>
                         <p style="font-size: 10px; color: var(--text-sub);">وقت البدء: ${formatDateTime(startTime)}</p>
@@ -871,16 +873,16 @@
                 const rewards = rec.rewards || 0;
                 const netDue = liveSalary + rewards - (rec.advances || 0);
 
-                const timerEl = document.getElementById(`timer_${d.name.replace(/\s+/g, '_')}`);
-                const statusEl = document.getElementById(`status_${d.name.replace(/\s+/g, '_')}`);
-                const endShiftBtnEl = document.getElementById(`end_btn_${d.name.replace(/\s+/g, '_')}`);
-                const salaryEl = document.getElementById(`salary_${d.name.replace(/\s+/g, '_')}`);
-                const rewardsEl = document.getElementById(`rewards_${d.name.replace(/\s+/g, '_')}`);
-                const netEl = document.getElementById(`net_${d.name.replace(/\s+/g, '_')}`);
-                const todayHoursEl = document.getElementById(`today_hours_${d.name.replace(/\s+/g, '_')}`);
-                const weekHoursEl = document.getElementById(`week_hours_${d.name.replace(/\s+/g, '_')}`);
-                const startTimeEl = document.getElementById(`start_time_${d.name.replace(/\s+/g, '_')}`);
-                const endTimeEl = document.getElementById(`end_time_${d.name.replace(/\s+/g, '_')}`);
+                const timerEl = document.getElementById(`timer_${encodeURIComponent(String(d.name))}`);
+                const statusEl = document.getElementById(`status_${encodeURIComponent(String(d.name))}`);
+                const endShiftBtnEl = document.getElementById(`end_btn_${encodeURIComponent(String(d.name))}`);
+                const salaryEl = document.getElementById(`salary_${encodeURIComponent(String(d.name))}`);
+                const rewardsEl = document.getElementById(`rewards_${encodeURIComponent(String(d.name))}`);
+                const netEl = document.getElementById(`net_${encodeURIComponent(String(d.name))}`);
+                const todayHoursEl = document.getElementById(`today_hours_${encodeURIComponent(String(d.name))}`);
+                const weekHoursEl = document.getElementById(`week_hours_${encodeURIComponent(String(d.name))}`);
+                const startTimeEl = document.getElementById(`start_time_${encodeURIComponent(String(d.name))}`);
+                const endTimeEl = document.getElementById(`end_time_${encodeURIComponent(String(d.name))}`);
 
                 if (timerEl) timerEl.innerText = `⏱️ ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
                 if (statusEl) {
@@ -973,8 +975,8 @@
                             <h3 style="font-size:13px; font-weight:800; margin-top:4px;">${escapeHtml(car.model)}</h3>
                         </div>
                         <div>
-                            <button onclick="editCar(${car.id})" style="background:transparent; border:none; color:var(--text-sub); font-size:12px; cursor:pointer; margin-left:6px;">✏️</button>
-                            <button onclick="askDeleteCar(${car.id})" style="background:transparent; border:none; color:var(--accent-red); font-size:12px; cursor:pointer;">🗑️</button>
+                            <button onclick="editCar(${inlineArg(car.id)})" style="background:transparent; border:none; color:var(--text-sub); font-size:12px; cursor:pointer; margin-left:6px;">✏️</button>
+                            <button onclick="askDeleteCar(${inlineArg(car.id)})" style="background:transparent; border:none; color:var(--accent-red); font-size:12px; cursor:pointer;">🗑️</button>
                         </div>
                     </div>
                     <div class="drivers-grid">
@@ -985,7 +987,7 @@
                             </div>
                             <div class="driver-actions-group">
                                 ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.dayDriver.name)}, 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
-                                ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'day')" class="btn-del-sm">✕</button>` : ''}
+                                ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${inlineArg(car.id)}, 'day')" class="btn-del-sm">✕</button>` : ''}
                             </div>
                         </div>
                         <div class="driver-subcard">
@@ -995,7 +997,7 @@
                             </div>
                             <div class="driver-actions-group">
                                 ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.nightDriver.name)}, 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
-                                ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'night')" class="btn-del-sm">✕</button>` : ''}
+                                ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${inlineArg(car.id)}, 'night')" class="btn-del-sm">✕</button>` : ''}
                             </div>
                         </div>
                     </div>
@@ -1016,7 +1018,7 @@
         }
 
         window.editCar = function(carId) {
-            const car = window.appState.cars.find(c => c.id === carId);
+            const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('carEditId').value = car.id;
             document.getElementById('carPlate').value = car.plate;
@@ -1060,19 +1062,19 @@
         }
 
         window.askDeleteCar = function(carId) {
-            const car = window.appState.cars.find(c => c.id === carId);
+            const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('deleteModalTitle').innerText = "حذف السيارة";
             document.getElementById('deleteModalDesc').innerText = `هل تريد حذف (${car.plate})؟`;
             pendingDeleteAction = () => {
-                window.appState.cars = window.appState.cars.filter(c => c.id !== carId);
+                window.appState.cars = window.appState.cars.filter(c => String(c.id) !== String(carId));
                 db.ref('cars').set(window.appState.cars);
             };
             openModal('deleteModal');
         }
 
         window.askRemoveDriver = function(carId, shiftType) {
-            const car = window.appState.cars.find(c => c.id === carId);
+            const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('deleteModalTitle').innerText = "إزالة السائق";
             document.getElementById('deleteModalDesc').innerText = `إزالة سائق الشفت للسيارة (${car.plate})؟`;
@@ -1138,9 +1140,12 @@
             if (!weeks.includes(thisWeek)) weeks.push(thisWeek);
             weeks.sort().reverse();
 
-            selector.innerHTML = weeks.map(w => `
-                <option value="${w}" ${w === window.currentActiveWeek ? 'selected' : ''}>أسبوع (من سبت): ${w.replace('-W_Sat_', ' ')} ${w === thisWeek ? '(الحالي)' : ''}</option>
-            `).join('');
+            selector.replaceChildren();
+            weeks.forEach(w => {
+                const option = new Option('أسبوع (من سبت): ' + String(w).replace('-W_Sat_', ' ') + (w === thisWeek ? ' (الحالي)' : ''), String(w));
+                option.selected = w === window.currentActiveWeek;
+                selector.appendChild(option);
+            });
         }
 
         window.changeWeekView = function() {
@@ -1179,16 +1184,17 @@
                 const rewards = rec.rewards || 0;
                 const netDue = initialSalary + rewards - (rec.advances || 0);
                 
-                const timerId = `timer_${d.name.replace(/\s+/g, '_')}`;
-                const statusId = `status_${d.name.replace(/\s+/g, '_')}`;
-                const endBtnId = `end_btn_${d.name.replace(/\s+/g, '_')}`;
-                const salaryId = `salary_${d.name.replace(/\s+/g, '_')}`;
-                const netId = `net_${d.name.replace(/\s+/g, '_')}`;
-                const todayHoursId = `today_hours_${d.name.replace(/\s+/g, '_')}`;
-                const weekHoursId = `week_hours_${d.name.replace(/\s+/g, '_')}`;
-                const startTimeId = `start_time_${d.name.replace(/\s+/g, '_')}`;
-                const endTimeId = `end_time_${d.name.replace(/\s+/g, '_')}`;
-                const dropdownId = `dropdown_days_${d.name.replace(/\s+/g, '_')}`;
+                const safeDriverId = encodeURIComponent(String(d.name));
+                const timerId = `timer_${safeDriverId}`;
+                const statusId = `status_${safeDriverId}`;
+                const endBtnId = `end_btn_${safeDriverId}`;
+                const salaryId = `salary_${safeDriverId}`;
+                const netId = `net_${safeDriverId}`;
+                const todayHoursId = `today_hours_${safeDriverId}`;
+                const weekHoursId = `week_hours_${safeDriverId}`;
+                const startTimeId = `start_time_${safeDriverId}`;
+                const endTimeId = `end_time_${safeDriverId}`;
+                const dropdownId = `dropdown_days_${safeDriverId}`;
 
                 let daysRowsHtml = weekDays.map(day => {
                     const dayData = rec.days && rec.days[day.dateKey];
