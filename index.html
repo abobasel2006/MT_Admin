@@ -1069,6 +1069,7 @@
             document.getElementById('deleteModalTitle').innerText = "حذف السيارة";
             document.getElementById('deleteModalDesc').innerText = `هل تريد حذف (${car.plate})؟`;
             pendingDeleteAction = () => {
+                if (window.appState.activeShifts[String(carId)]) return alert('بدأت وردية جديدة لهذه السيارة. ألغيت عملية الحذف.');
                 window.appState.cars = window.appState.cars.filter(c => String(c.id) !== String(carId));
                 db.ref('cars').set(window.appState.cars);
             };
@@ -1082,6 +1083,7 @@
             document.getElementById('deleteModalTitle').innerText = "إزالة السائق";
             document.getElementById('deleteModalDesc').innerText = `إزالة سائق الشفت للسيارة (${car.plate})؟`;
             pendingDeleteAction = () => {
+                if (window.appState.activeShifts[String(carId)]) return alert('بدأت وردية جديدة لهذه السيارة. ألغيت عملية الإزالة.');
                 if (shiftType === 'day') car.dayDriver = { name: "", phone: "" };
                 if (shiftType === 'night') car.nightDriver = { name: "", phone: "" };
                 db.ref('cars').set(window.appState.cars);
