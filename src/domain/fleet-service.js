@@ -1,7 +1,6 @@
 import { db, ref, get, push, runTransaction } from "../firebase.js";
 
 const fleetRef = ref(db, "fleetState");
-const shiftRef = ref(db, "shiftState");
 const validShiftTypes = new Set(["day", "night"]);
 
 function cleanId(value, label) {
