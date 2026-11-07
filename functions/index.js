@@ -20,7 +20,7 @@ function requireFourDigitPin(pin) {
   }
 }
 
-exports.setDriverPin = onCall({ region: "europe-west1", secrets: [pinPepper] }, async (request) => {
+exports.setDriverPin = onCall({ region: "europe-west1", enforceAppCheck: true, secrets: [pinPepper] }, async (request) => {
   requireIdentity(request, "admin");
   const { driverId, pin } = request.data || {};
   requireFourDigitPin(pin);
@@ -41,7 +41,7 @@ exports.setDriverPin = onCall({ region: "europe-west1", secrets: [pinPepper] }, 
   return { success: true };
 });
 
-exports.loginWithPin = onCall({ region: "europe-west1", secrets: [pinPepper] }, async (request) => {
+exports.loginWithPin = onCall({ region: "europe-west1", enforceAppCheck: true, secrets: [pinPepper] }, async (request) => {
   const { driverId, pin } = request.data || {};
   requireFourDigitPin(pin);
   if (typeof driverId !== "string" || !driverId.trim()) {
@@ -110,7 +110,7 @@ function validOdometer(value) {
     (Number.isFinite(Number(value)) && Number(value) >= 0);
 }
 
-exports.startShift = onCall({ region: "europe-west1" }, async (request) => {
+exports.startShift = onCall({ region: "europe-west1", enforceAppCheck: true }, async (request) => {
   const claims = requireIdentity(request, "driver");
   const driverId = String(claims.driverId);
   const { carId, shiftType, startOdometer = null } = request.data || {};
@@ -172,7 +172,7 @@ exports.startShift = onCall({ region: "europe-west1" }, async (request) => {
   return result.snapshot.val().shiftState.history[shiftId];
 });
 
-exports.endShift = onCall({ region: "europe-west1" }, async (request) => {
+exports.endShift = onCall({ region: "europe-west1", enforceAppCheck: true }, async (request) => {
   const claims = requireIdentity(request, "driver");
   const driverId = String(claims.driverId);
   const { shiftId, endOdometer = null } = request.data || {};
@@ -236,7 +236,7 @@ exports.endShift = onCall({ region: "europe-west1" }, async (request) => {
 // Temporary admin step-up authentication. The PIN is supplied only through
 // Secret Manager; it is never embedded in browser assets or repository files.
 exports.loginAdminWithPin = onCall(
-  { region: "europe-west1", secrets: [adminPinSecret] },
+  { region: "europe-west1", enforceAppCheck: true, secrets: [adminPinSecret] },
   async (request) => {
     const supplied = request.data?.pin;
     if (typeof supplied !== "string" || !/^\d{4}$/.test(supplied)) {
@@ -287,7 +287,7 @@ exports.loginAdminWithPin = onCall(
 // Minimal public roster used only to let a driver identify their assigned
 // vehicle/shift before PIN verification. No phone numbers, notes, or inactive
 // records are returned. The PIN remains the actual login credential.
-exports.listDriverLoginOptions = onCall({ region: "europe-west1" }, async () => {
+exports.listDriverLoginOptions = onCall({ region: "europe-west1", enforceAppCheck: true }, async () => {
   const [driversSnap, carsSnap] = await Promise.all([
     database.ref("fleetState/drivers").get(),
     database.ref("fleetState/cars").get()
@@ -310,7 +310,7 @@ exports.listDriverLoginOptions = onCall({ region: "europe-west1" }, async () => 
   return { options };
 });
 
-exports.getMyActiveShift = onCall({ region: "europe-west1" }, async (request) => {
+exports.getMyActiveShift = onCall({ region: "europe-west1", enforceAppCheck: true }, async (request) => {
   const claims = requireIdentity(request, "driver");
   const driverId = String(claims.driverId);
   const [indexSnap, historySnap] = await Promise.all([
@@ -365,7 +365,7 @@ async function runAdminFleetMutation(request, mutate) {
   return result.snapshot.val();
 }
 
-exports.adminCreateDriver = onCall({ region: "europe-west1" }, async request => {
+exports.adminCreateDriver = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const name = adminText(request.data?.name, "اسم السائق", true, 80);
   const phone = adminText(request.data?.phone, "الهاتف", false, 30);
   const notes = adminText(request.data?.notes, "الملاحظات", false, 180);
@@ -381,7 +381,7 @@ exports.adminCreateDriver = onCall({ region: "europe-west1" }, async request => 
   return { driverId };
 });
 
-exports.adminUpdateDriver = onCall({ region: "europe-west1" }, async request => {
+exports.adminUpdateDriver = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const id = adminId(request.data?.driverId, "السائق");
   const name = request.data?.name === undefined ? undefined : adminText(request.data.name, "اسم السائق", true, 80);
   const phone = request.data?.phone === undefined ? undefined : adminText(request.data.phone, "الهاتف", false, 30);
@@ -398,7 +398,7 @@ exports.adminUpdateDriver = onCall({ region: "europe-west1" }, async request => 
   return { success: true };
 });
 
-exports.adminCreateCar = onCall({ region: "europe-west1" }, async request => {
+exports.adminCreateCar = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const plate = adminText(request.data?.plate, "رقم اللوحة", true, 40);
   const model = adminText(request.data?.model, "الموديل", false, 60);
   const carId = database.ref("fleetState/cars").push().key;
@@ -414,7 +414,7 @@ exports.adminCreateCar = onCall({ region: "europe-west1" }, async request => {
   return { carId };
 });
 
-exports.adminUpdateCar = onCall({ region: "europe-west1" }, async request => {
+exports.adminUpdateCar = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const id = adminId(request.data?.carId, "السيارة");
   const plate = request.data?.plate === undefined ? undefined : adminText(request.data.plate, "رقم اللوحة", true, 40);
   const model = request.data?.model === undefined ? undefined : adminText(request.data.model, "الموديل", false, 60);
@@ -429,7 +429,7 @@ exports.adminUpdateCar = onCall({ region: "europe-west1" }, async request => {
   return { success: true };
 });
 
-exports.adminAssignCarDrivers = onCall({ region: "europe-west1" }, async request => {
+exports.adminAssignCarDrivers = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const carId = adminId(request.data?.carId, "السيارة");
   const dayDriverId = request.data?.dayDriverId == null ? null : adminId(request.data.dayDriverId, "السائق");
   const nightDriverId = request.data?.nightDriverId == null ? null : adminId(request.data.nightDriverId, "السائق");
@@ -467,7 +467,7 @@ exports.adminAssignCarDrivers = onCall({ region: "europe-west1" }, async request
   return { success: true };
 });
 
-exports.adminDeactivateDriver = onCall({ region: "europe-west1" }, async request => {
+exports.adminDeactivateDriver = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const id = adminId(request.data?.driverId, "السائق");
   await runAdminFleetMutation(request, root => {
     const driver = root.fleetState.drivers[id];
@@ -481,7 +481,7 @@ exports.adminDeactivateDriver = onCall({ region: "europe-west1" }, async request
   return { success: true };
 });
 
-exports.adminDeactivateCar = onCall({ region: "europe-west1" }, async request => {
+exports.adminDeactivateCar = onCall({ region: "europe-west1", enforceAppCheck: true }, async request => {
   const id = adminId(request.data?.carId, "السيارة");
   await runAdminFleetMutation(request, root => {
     const car = root.fleetState.cars[id];
