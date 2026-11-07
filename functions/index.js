@@ -32,7 +32,7 @@ exports.setDriverPin = onCall({ region: "europe-west1", enforceAppCheck: true, s
   }
   const salt = crypto.randomBytes(16).toString("hex");
   const hash = pinDigest(pin, salt, pinPepper.value());
-  await database.ref("security/driverPins/" + driverId.trim()).set({
+  await database.ref("security/driverPins/" + id).set({
     salt, hash, updatedAt: Date.now(), version: 1
   });
   await database.ref("security/pinAttempts/" + id).remove();
