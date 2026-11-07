@@ -577,18 +577,20 @@
             shiftRef.transaction(current => {
                 if (!current || current.driver !== driverName || Number(current.timestamp) !== startTime) return;
                 if (current.status === 'finalizing') {
+                    // Allow admin to recover an expired driver or admin finalization lease.
+                    // Preserve the original endTime and any end-odometer image.
                     const stale = Date.now() - Number(current.finalizingAt || 0) > 120000;
-                    if (current.finalizedBy !== 'admin' || !stale) return;
+                    if (!stale) return;
                     return { ...current, finalizingAt: Date.now(), finalizationToken };
                 }
                 return { ...current, status: 'finalizing', finalizedBy: 'admin', finalizingAt: Date.now(), finalizationToken, endTime: requestedEndTime };
             }).then(result => {
                 if (!result.committed || result.snapshot.val()?.finalizationToken !== finalizationToken) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن الإنهاء جارٍ من جهاز آخر. أعد المحاولة لاحقاً إذا بقيت عالقة.');
                 const finalShift = result.snapshot.val();
-                if (!finalShift || finalShift.finalizedBy !== 'admin') throw new Error('يجري إنهاء الوردية من جهة أخرى.');
+                if (!finalShift) throw new Error('تعذر استعادة بيانات الوردية بعد حجز عملية الإنهاء.');
                 const finalEndTime = Number(finalShift.endTime);
                 if (!finalEndTime || finalEndTime <= startTime) throw new Error('وقت إنهاء الوردية غير صالح.');
-                return applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, finalShift, false).then(() => {
+                return applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, finalShift, Boolean(finalShift.endOdoImg)).then(() => {
                     delete adminShiftStartTimes[driverName];
                     alert(`تم إنهاء وردية السائق (${driverName}) وتوزيع ساعاتها على الأيام والأسابيع الصحيحة.`);
                 });
