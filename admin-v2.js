@@ -12,7 +12,7 @@ async function ensureAdminSession() {
   }
   const adminPin = window.prompt("أدخل رمز الإدارة لتأكيد العملية:");
   if (adminPin === null) throw new Error("تم إلغاء العملية.");
-  if (!/^\\d{4}$/.test(adminPin)) throw new Error("رمز الإدارة يجب أن يتكون من أربعة أرقام.");
+  if (!/^\d{4}$/.test(adminPin)) throw new Error("رمز الإدارة يجب أن يتكون من أربعة أرقام.");
   const result = await loginAdminWithPin({ pin: adminPin });
   await setPersistence(auth, browserSessionPersistence);
   await signInWithCustomToken(auth, result.data.token);
@@ -46,7 +46,7 @@ document.addEventListener("click", e => {
   if (b.dataset.setPin) act(async () => {
     const pin = window.prompt("أدخل PIN جديداً للسائق (أربعة أرقام):");
     if (pin === null) return;
-    if (!/^\\d{4}$/.test(pin)) throw new Error("PIN يجب أن يتكون من أربعة أرقام بالضبط.");
+    if (!/^\d{4}$/.test(pin)) throw new Error("PIN يجب أن يتكون من أربعة أرقام بالضبط.");
     await setDriverPin({ driverId: id, pin });
     note("تم تعيين PIN للسائق بنجاح.");
   });
