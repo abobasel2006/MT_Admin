@@ -282,3 +282,43 @@ exports.loginAdminWithPin = onCall(
     return { token };
   }
 );
+
+
+// Minimal public roster used only to let a driver identify their assigned
+// vehicle/shift before PIN verification. No phone numbers, notes, or inactive
+// records are returned. The PIN remains the actual login credential.
+exports.listDriverLoginOptions = onCall({ region: "europe-west1" }, async () => {
+  const [driversSnap, carsSnap] = await Promise.all([
+    database.ref("fleetState/drivers").get(),
+    database.ref("fleetState/cars").get()
+  ]);
+  const drivers = driversSnap.val() || {};
+  const cars = carsSnap.val() || {};
+  const options = [];
+  for (const [carId, car] of Object.entries(cars)) {
+    if (!car || car.active !== true) continue;
+    for (const shiftType of ["day", "night"]) {
+      const driverId = car[shiftType === "day" ? "dayDriverId" : "nightDriverId"];
+      const driver = driverId ? drivers[driverId] : null;
+      if (!driver || driver.active !== true) continue;
+      options.push({
+        driverId, driverName: String(driver.name || "سائق"),
+        carId, plate: String(car.plate || ""), shiftType
+      });
+    }
+  }
+  return { options };
+});
+
+exports.getMyActiveShift = onCall({ region: "europe-west1" }, async (request) => {
+  const claims = requireIdentity(request, "driver");
+  const driverId = String(claims.driverId);
+  const [indexSnap, historySnap] = await Promise.all([
+    database.ref("shiftState/activeByDriver/" + driverId).get(),
+    database.ref("shiftState/history").get()
+  ]);
+  const shiftId = indexSnap.val();
+  const shift = shiftId ? historySnap.child(shiftId).val() : null;
+  if (!shift || shift.status !== "active" || shift.driverId !== driverId) return { shift: null };
+  return { shift };
+});
