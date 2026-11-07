@@ -28,7 +28,7 @@ export async function startShift({ driverId, carId, shiftType, startOdometer = n
   };
 
   const reservation = await runTransaction(lockRef, current => {
-    if (current && current.status === "active") return;
+    if (current) return;
     return shift;
   });
 
