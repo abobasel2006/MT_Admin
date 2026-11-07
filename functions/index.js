@@ -322,3 +322,185 @@ exports.getMyActiveShift = onCall({ region: "europe-west1" }, async (request) =>
   if (!shift || shift.status !== "active" || shift.driverId !== driverId) return { shift: null };
   return { shift };
 });
+
+
+function adminText(value, field, required = false, max = 180) {
+  if (value == null && !required) return "";
+  if (typeof value !== "string") throw new HttpsError("invalid-argument", "حقل " + field + " غير صالح.");
+  const cleaned = value.trim();
+  if (required && !cleaned) throw new HttpsError("invalid-argument", "حقل " + field + " مطلوب.");
+  if (cleaned.length > max) throw new HttpsError("invalid-argument", "حقل " + field + " أطول من المسموح.");
+  return cleaned;
+}
+
+function adminId(value, field) {
+  if (typeof value !== "string" || !value.trim() ||
+      /[.#$\[\]\/]/.test(value)) {
+    throw new HttpsError("invalid-argument", "معرّف " + field + " غير صالح.");
+  }
+  return value.trim();
+}
+
+async function runAdminFleetMutation(request, mutate) {
+  requireIdentity(request, "admin");
+  let failure = "تعذر تنفيذ العملية.";
+  const result = await database.ref().transaction(current => {
+    const root = current || {};
+    root.fleetState ||= {};
+    root.fleetState.drivers ||= {};
+    root.fleetState.cars ||= {};
+    root.fleetState.driverAssignmentIndex ||= {};
+    root.shiftState ||= {};
+    root.shiftState.activeByCar ||= {};
+    root.shiftState.activeByDriver ||= {};
+    root.shiftState.history ||= {};
+    const message = mutate(root);
+    if (message) {
+      failure = message;
+      return;
+    }
+    return root;
+  }, undefined, false);
+  if (!result.committed) throw new HttpsError("failed-precondition", failure);
+  return result.snapshot.val();
+}
+
+exports.adminCreateDriver = onCall({ region: "europe-west1" }, async request => {
+  const name = adminText(request.data?.name, "اسم السائق", true, 80);
+  const phone = adminText(request.data?.phone, "الهاتف", false, 30);
+  const notes = adminText(request.data?.notes, "الملاحظات", false, 180);
+  const driverId = database.ref("fleetState/drivers").push().key;
+  const now = Date.now();
+  await runAdminFleetMutation(request, root => {
+    if (root.fleetState.drivers[driverId]) return "معرّف السائق مستخدم بالفعل.";
+    root.fleetState.drivers[driverId] = {
+      driverId, name, phone, notes, active: true, createdAt: now, updatedAt: now
+    };
+    return null;
+  });
+  return { driverId };
+});
+
+exports.adminUpdateDriver = onCall({ region: "europe-west1" }, async request => {
+  const id = adminId(request.data?.driverId, "السائق");
+  const name = request.data?.name === undefined ? undefined : adminText(request.data.name, "اسم السائق", true, 80);
+  const phone = request.data?.phone === undefined ? undefined : adminText(request.data.phone, "الهاتف", false, 30);
+  const notes = request.data?.notes === undefined ? undefined : adminText(request.data.notes, "الملاحظات", false, 180);
+  await runAdminFleetMutation(request, root => {
+    const driver = root.fleetState.drivers[id];
+    if (!driver) return "السائق غير موجود.";
+    if (name !== undefined) driver.name = name;
+    if (phone !== undefined) driver.phone = phone;
+    if (notes !== undefined) driver.notes = notes;
+    driver.updatedAt = Date.now();
+    return null;
+  });
+  return { success: true };
+});
+
+exports.adminCreateCar = onCall({ region: "europe-west1" }, async request => {
+  const plate = adminText(request.data?.plate, "رقم اللوحة", true, 40);
+  const model = adminText(request.data?.model, "الموديل", false, 60);
+  const carId = database.ref("fleetState/cars").push().key;
+  const now = Date.now();
+  await runAdminFleetMutation(request, root => {
+    if (root.fleetState.cars[carId]) return "معرّف السيارة مستخدم بالفعل.";
+    root.fleetState.cars[carId] = {
+      carId, plate, model, active: true, dayDriverId: null, nightDriverId: null,
+      createdAt: now, updatedAt: now
+    };
+    return null;
+  });
+  return { carId };
+});
+
+exports.adminUpdateCar = onCall({ region: "europe-west1" }, async request => {
+  const id = adminId(request.data?.carId, "السيارة");
+  const plate = request.data?.plate === undefined ? undefined : adminText(request.data.plate, "رقم اللوحة", true, 40);
+  const model = request.data?.model === undefined ? undefined : adminText(request.data.model, "الموديل", false, 60);
+  await runAdminFleetMutation(request, root => {
+    const car = root.fleetState.cars[id];
+    if (!car) return "السيارة غير موجودة.";
+    if (plate !== undefined) car.plate = plate;
+    if (model !== undefined) car.model = model;
+    car.updatedAt = Date.now();
+    return null;
+  });
+  return { success: true };
+});
+
+exports.adminAssignCarDrivers = onCall({ region: "europe-west1" }, async request => {
+  const carId = adminId(request.data?.carId, "السيارة");
+  const dayDriverId = request.data?.dayDriverId == null ? null : adminId(request.data.dayDriverId, "السائق");
+  const nightDriverId = request.data?.nightDriverId == null ? null : adminId(request.data.nightDriverId, "السائق");
+  if (dayDriverId && dayDriverId === nightDriverId) {
+    throw new HttpsError("invalid-argument", "لا يمكن تعيين السائق نفسه للوردية النهارية والليلية.");
+  }
+  await runAdminFleetMutation(request, root => {
+    const fleet = root.fleetState;
+    const car = fleet.cars[carId];
+    if (!car || car.active !== true) return "السيارة غير موجودة أو غير نشطة.";
+    for (const [type, nextId] of [["day", dayDriverId], ["night", nightDriverId]]) {
+      const field = type === "day" ? "dayDriverId" : "nightDriverId";
+      const previousId = car[field] || null;
+      const slot = carId + "__" + type;
+      if (previousId !== nextId && root.shiftState.activeByCar[slot]) return "لا يمكن تغيير التعيين أثناء وجود وردية نشطة.";
+      if (nextId) {
+        const driver = fleet.drivers[nextId];
+        if (!driver || driver.active !== true) return "السائق غير موجود أو غير نشط.";
+        const assigned = fleet.driverAssignmentIndex[nextId];
+        if (assigned && assigned !== slot) return "السائق معين مسبقاً إلى سيارة أو وردية أخرى.";
+        if (previousId !== nextId && root.shiftState.activeByDriver[nextId]) return "لا يمكن تعيين سائق لديه وردية نشطة.";
+      }
+    }
+    for (const [type, nextId] of [["day", dayDriverId], ["night", nightDriverId]]) {
+      const field = type === "day" ? "dayDriverId" : "nightDriverId";
+      const previousId = car[field] || null;
+      const slot = carId + "__" + type;
+      if (previousId && fleet.driverAssignmentIndex[previousId] === slot) delete fleet.driverAssignmentIndex[previousId];
+      car[field] = nextId;
+      if (nextId) fleet.driverAssignmentIndex[nextId] = slot;
+    }
+    car.updatedAt = Date.now();
+    return null;
+  });
+  return { success: true };
+});
+
+exports.adminDeactivateDriver = onCall({ region: "europe-west1" }, async request => {
+  const id = adminId(request.data?.driverId, "السائق");
+  await runAdminFleetMutation(request, root => {
+    const driver = root.fleetState.drivers[id];
+    if (!driver) return "السائق غير موجود.";
+    if (root.shiftState.activeByDriver[id]) return "لا يمكن تعطيل سائق لديه وردية نشطة.";
+    if (root.fleetState.driverAssignmentIndex[id]) return "يجب فك تعيين السائق من السيارة أولاً.";
+    driver.active = false;
+    driver.updatedAt = Date.now();
+    return null;
+  });
+  return { success: true };
+});
+
+exports.adminDeactivateCar = onCall({ region: "europe-west1" }, async request => {
+  const id = adminId(request.data?.carId, "السيارة");
+  await runAdminFleetMutation(request, root => {
+    const car = root.fleetState.cars[id];
+    if (!car) return "السيارة غير موجودة.";
+    for (const type of ["day", "night"]) {
+      if (root.shiftState.activeByCar[id + "__" + type]) return "لا يمكن تعطيل سيارة لديها وردية نشطة.";
+    }
+    for (const type of ["day", "night"]) {
+      const field = type === "day" ? "dayDriverId" : "nightDriverId";
+      const driverId = car[field];
+      const slot = id + "__" + type;
+      if (driverId && root.fleetState.driverAssignmentIndex[driverId] === slot) {
+        delete root.fleetState.driverAssignmentIndex[driverId];
+      }
+      car[field] = null;
+    }
+    car.active = false;
+    car.updatedAt = Date.now();
+    return null;
+  });
+  return { success: true };
+});
