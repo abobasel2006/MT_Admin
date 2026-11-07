@@ -22,8 +22,8 @@ function render() {
     (c.active ? '<div class="inline-fields"><input data-plate="' + esc(id) + '" value="' + esc(c.plate) + '" aria-label="لوحة السيارة"><input data-model="' + esc(id) + '" value="' + esc(c.model || '') + '" placeholder="الموديل"><button class="secondary" data-save-car="' + esc(id) + '">حفظ السيارة</button><button class="danger" data-disable-car="' + esc(id) + '">تعطيل السيارة</button></div>' : '') + '</article>'
   ).join("") || '<p class="empty">لا توجد سيارات بعد.</p>';
 }
-$("#driverForm").addEventListener("submit", e => { e.preventDefault(); const d = new FormData(e.currentTarget); act(async () => { await createDriver({name:d.get("name"),phone:d.get("phone"),notes:d.get("notes")}); e.currentTarget.reset(); note("تم إنشاء السائق."); }); });
-$("#carForm").addEventListener("submit", e => { e.preventDefault(); const d = new FormData(e.currentTarget); act(async () => { await createCar({plate:d.get("plate"),model:d.get("model")}); e.currentTarget.reset(); note("تمت إضافة السيارة."); }); });
+$("#driverForm").addEventListener("submit", e => { e.preventDefault(); const form = e.currentTarget; const d = new FormData(form); act(async () => { await createDriver({name:d.get("name"),phone:d.get("phone"),notes:d.get("notes")}); form.reset(); note("تم إنشاء السائق."); }); });
+$("#carForm").addEventListener("submit", e => { e.preventDefault(); const form = e.currentTarget; const d = new FormData(form); act(async () => { await createCar({plate:d.get("plate"),model:d.get("model")}); form.reset(); note("تمت إضافة السيارة."); }); });
 document.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   const id = b.dataset.saveDriver || b.dataset.disableDriver || b.dataset.saveCar || b.dataset.disableCar; if (!id) return;
