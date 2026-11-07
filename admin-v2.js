@@ -1,7 +1,7 @@
 import { db, ref, onValue } from "./src/firebase.js";
 import { createDriver, updateDriver, createCar, updateCar, assignCarDrivers, deactivateDriver, deactivateCar } from "./src/domain/fleet-service.js";
 const $ = s => document.querySelector(s);
-const state = { drivers: {}, cars: {} };
+const state = { drivers: {}, cars: {}, shifts: {} };
 const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const activeDrivers = () => Object.entries(state.drivers).filter(x => x[1] && x[1].active === true);
 function note(message, bad) { $("#notice").textContent = message; $("#notice").dataset.kind = bad ? "error" : "success"; }
@@ -42,3 +42,36 @@ onValue(ref(db,"fleetState"), snap => {
   $("#connection").textContent = "تحديث مباشر لبيانات الأسطول.";
   $("#connection").dataset.state = "ready"; render();
 }, err => { $("#connection").textContent = "تعذرت قراءة بيانات الأسطول. تحقق من قواعد Firebase."; $("#connection").dataset.state = "locked"; note(err.message || "فشل تحميل البيانات.",true); console.error(err); });
+
+
+// متابعة الورديات النشطة — عرض فقط؛ الإنهاء يبقى من حساب السائق.
+const formatDate = value => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "غير متاح";
+  return new Intl.DateTimeFormat("ar", { dateStyle: "medium", timeStyle: "short" }).format(new Date(n));
+};
+function renderShifts() {
+  const active = Object.entries(state.shifts?.history || {})
+    .filter(([, shift]) => shift && shift.status === "active")
+    .sort((a, b) => Number(b[1].startedAt || 0) - Number(a[1].startedAt || 0));
+  $("#activeShiftCount").textContent = String(active.length);
+  $("#activeShiftsList").innerHTML = active.map(([id, shift]) => {
+    const driver = state.drivers[shift.driverId];
+    const car = state.cars[shift.carId];
+    const type = shift.shiftType === "day" ? "نهارية" : shift.shiftType === "night" ? "ليلية" : "غير محددة";
+    return '<article class="item-card"><div class="item-head"><div><strong>' + esc(driver?.name || "سائق غير معروف") + '</strong><small>معرّف الوردية: ' + esc(id) + '</small></div><span class="pill good">نشطة</span></div>' +
+      '<div class="shift-details"><span>السيارة: <b>' + esc(car?.plate || shift.carId || "غير معروفة") + '</b></span><span>الوردية: <b>' + type + '</b></span><span>بداية الوردية: <b>' + esc(formatDate(shift.startedAt)) + '</b></span><span>عداد البداية: <b>' + esc(shift.startOdometer ?? "غير مسجل") + '</b></span></div>' +
+      '<p class="shift-note">إنهاء الوردية يتم من حساب السائق المسجّل عليها.</p></article>';
+  }).join("") || '<p class="empty">لا توجد ورديات نشطة حالياً، أو لم تصل بيانات الورديات بعد.</p>';
+}
+onValue(ref(db, "shiftState"), snap => {
+  state.shifts = snap.val() || {};
+  $("#shiftConnection").textContent = "تم تحديث بيانات الورديات.";
+  $("#shiftConnection").dataset.state = "ready";
+  renderShifts();
+}, err => {
+  $("#shiftConnection").textContent = "تعذرت قراءة الورديات. تحقق من صلاحيات قاعدة Firebase.";
+  $("#shiftConnection").dataset.state = "locked";
+  $("#activeShiftsList").innerHTML = '<p class="empty">لا يمكن عرض الورديات قبل منح صلاحية القراءة المناسبة.</p>';
+  console.error("shiftState listener:", err);
+});
