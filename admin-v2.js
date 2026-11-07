@@ -21,7 +21,7 @@ const state = { drivers: {}, cars: {}, shifts: {} };
 const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const activeDrivers = () => Object.entries(state.drivers).filter(x => x[1] && x[1].active === true);
 function note(message, bad) { $("#notice").textContent = message; $("#notice").dataset.kind = bad ? "error" : "success"; }
-async function act(fn) { try { await fn(); } catch (e) { console.error(e); note(e.message || "تعذر تنفيذ العملية.", true); } }
+async function act(fn) { try { await ensureAdminSession(); await fn(); } catch (e) { console.error(e); note(e.message || "تعذر تنفيذ العملية.", true); } }
 function options(selected) {
   return '<option value="">— بدون سائق —</option>' + activeDrivers().map(([id,d]) => '<option value="' + esc(id) + '"' + (id === selected ? ' selected' : '') + '>' + esc(d.name) + ' — ' + esc(id.slice(-5)) + '</option>').join("");
 }
@@ -44,7 +44,6 @@ document.addEventListener("click", e => {
   const b = e.target.closest("button"); if (!b) return;
   const id = b.dataset.saveDriver || b.dataset.disableDriver || b.dataset.saveCar || b.dataset.disableCar || b.dataset.setPin; if (!id) return;
   if (b.dataset.setPin) act(async () => {
-    await ensureAdminSession();
     const pin = window.prompt("أدخل PIN جديداً للسائق (أربعة أرقام):");
     if (pin === null) return;
     if (!/^\\d{4}$/.test(pin)) throw new Error("PIN يجب أن يتكون من أربعة أرقام بالضبط.");
@@ -61,11 +60,7 @@ document.addEventListener("change", e => {
   act(async () => { const car = state.cars[id]; const day = el.dataset.day ? (el.value || null) : (car.dayDriverId || null); const night = el.dataset.night ? (el.value || null) : (car.nightDriverId || null); await assignCarDrivers({carId:id,dayDriverId:day,nightDriverId:night}); note("تم حفظ تعيين السائقين."); });
 });
 $("#refreshBtn").addEventListener("click", () => location.reload());
-onValue(ref(db,"fleetState"), snap => {
-  const v = snap.val() || {}; state.drivers = v.drivers || {}; state.cars = v.cars || {};
-  $("#connection").textContent = "تحديث مباشر لبيانات الأسطول.";
-  $("#connection").dataset.state = "ready"; render();
-}, err => { $("#connection").textContent = "تعذرت قراءة بيانات الأسطول. تحقق من قواعد Firebase."; $("#connection").dataset.state = "locked"; note(err.message || "فشل تحميل البيانات.",true); console.error(err); });
+
 
 
 // متابعة الورديات النشطة — عرض فقط؛ الإنهاء يبقى من حساب السائق.
@@ -88,7 +83,22 @@ function renderShifts() {
       '<p class="shift-note">إنهاء الوردية يتم من حساب السائق المسجّل عليها.</p></article>';
   }).join("") || '<p class="empty">لا توجد ورديات نشطة حالياً، أو لم تصل بيانات الورديات بعد.</p>';
 }
-onValue(ref(db, "shiftState"), snap => {
+
+
+
+let adminListenersStarted = false;
+async function unlockAdminWorkspace() {
+  await ensureAdminSession();
+  if (adminListenersStarted) return;
+  adminListenersStarted = true;
+  $("#unlockAdminBtn").textContent = "الإدارة مفتوحة";
+  $("#unlockAdminBtn").disabled = true;
+  onValue(ref(db,"fleetState"), snap => {
+  const v = snap.val() || {}; state.drivers = v.drivers || {}; state.cars = v.cars || {};
+  $("#connection").textContent = "تحديث مباشر لبيانات الأسطول.";
+  $("#connection").dataset.state = "ready"; render();
+}, err => { $("#connection").textContent = "تعذرت قراءة بيانات الأسطول. تحقق من قواعد Firebase."; $("#connection").dataset.state = "locked"; note(err.message || "فشل تحميل البيانات.",true); console.error(err); });
+  onValue(ref(db, "shiftState"), snap => {
   state.shifts = snap.val() || {};
   $("#shiftConnection").textContent = "تم تحديث بيانات الورديات.";
   $("#shiftConnection").dataset.state = "ready";
@@ -98,4 +108,8 @@ onValue(ref(db, "shiftState"), snap => {
   $("#shiftConnection").dataset.state = "locked";
   $("#activeShiftsList").innerHTML = '<p class="empty">لا يمكن عرض الورديات قبل منح صلاحية القراءة المناسبة.</p>';
   console.error("shiftState listener:", err);
+});
+}
+$("#unlockAdminBtn").addEventListener("click", () => {
+  unlockAdminWorkspace().catch(error => note(error.message || "تعذر فتح بيانات الإدارة.", true));
 });
