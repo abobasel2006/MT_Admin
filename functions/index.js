@@ -14,7 +14,7 @@ function pinDigest(pin, salt, pepper) {
 }
 
 function requireFourDigitPin(pin) {
-  if (typeof pin !== "string" || !/^\\d{4}$/.test(pin)) {
+  if (typeof pin !== "string" || !/^\d{4}$/.test(pin)) {
     throw new HttpsError("invalid-argument", "رمز PIN يجب أن يتكون من أربعة أرقام فقط.");
   }
 }
