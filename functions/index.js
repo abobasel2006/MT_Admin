@@ -86,7 +86,7 @@ exports.startShift = onCall({ region: "europe-west1" }, async (request) => {
   return result.snapshot.val().shiftState.history[shiftId];
 });
 
-exports.endShift = onCall(async (request) => {
+exports.endShift = onCall({ region: "europe-west1" }, async (request) => {
   const claims = requireIdentity(request, "driver");
   const driverId = String(claims.driverId);
   const { shiftId, endOdometer = null } = request.data || {};
