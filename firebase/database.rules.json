@@ -4,7 +4,7 @@
     ".write": false,
     "fleetState": {
       ".read": "auth != null && auth.token.role === 'admin'",
-      ".write": "auth != null && auth.token.role === 'admin'"
+      ".write": false
     },
     "shiftState": {
       ".read": "auth != null && auth.token.role === 'admin'",
