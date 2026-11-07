@@ -24,3 +24,12 @@ The initial shift functions use a Realtime Database root transaction so fleet as
 3. Add emulator tests for simultaneous starts, duplicate ends, wrong-driver ends, inactive/unassigned drivers, and odometer validation.
 4. Review database rules separately; Admin SDK bypasses client rules.
 5. Deploy only after explicit approval. No deployment is performed by this change.
+
+## Four-digit driver PIN (development implementation)
+- Driver PINs are exactly four ASCII digits (`0000` through `9999`); leading zeroes are preserved.
+- `setDriverPin` requires an authenticated caller with the trusted `role: "admin"` claim and an active driver record.
+- PINs are salted and derived with scrypt plus a Secret Manager pepper (`MT_TAXI_PIN_PEPPER`). The raw PIN is not stored.
+- `loginWithPin` checks the PIN and issues a Firebase custom token carrying the server-controlled driver role and driver ID.
+- Five consecutive failures for a driver trigger a 15-minute lockout. This per-driver throttle is not a substitute for App Check and broader abuse monitoring.
+- Before deployment, create the `MT_TAXI_PIN_PEPPER` secret in the Firebase/GCP project. Do not commit it or send it in chat.
+- The admin claim must be provisioned by a trusted server-side process. The current admin page has not yet been wired to this function, and the driver page has not yet been migrated to PIN login. Do not deploy or treat this as a complete login flow until those client changes, App Check, and emulator tests are complete.
