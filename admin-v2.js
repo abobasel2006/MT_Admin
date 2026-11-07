@@ -21,7 +21,7 @@ const state = { drivers: {}, cars: {}, shifts: {} };
 const esc = v => String(v == null ? "" : v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const activeDrivers = () => Object.entries(state.drivers).filter(x => x[1] && x[1].active === true);
 function note(message, bad) { $("#notice").textContent = message; $("#notice").dataset.kind = bad ? "error" : "success"; }
-async function act(fn) { try { await ensureAdminSession(); await fn(); } catch (e) { console.error(e); note(e.message || "تعذر تنفيذ العملية.", true); } }
+async function act(fn) { try { await unlockAdminWorkspace(); await fn(); } catch (e) { console.error(e); note(e.message || "تعذر تنفيذ العملية.", true); } }
 function options(selected) {
   return '<option value="">— بدون سائق —</option>' + activeDrivers().map(([id,d]) => '<option value="' + esc(id) + '"' + (id === selected ? ' selected' : '') + '>' + esc(d.name) + ' — ' + esc(id.slice(-5)) + '</option>').join("");
 }
