@@ -41,3 +41,7 @@ The management page itself loads without a sign-in screen. Its private fleet and
 The temporary admin PIN is read only from Firebase Secret Manager under `MT_TAXI_ADMIN_PIN`; it must never be added to the web app, source control, or browser storage. The owner must set that secret out-of-band. The current source does not contain the PIN value.
 
 **Security limitation:** a four-digit PIN has only 10,000 possibilities. The current callable includes an IP-based 5-attempt/15-minute throttle, but this is not sufficient by itself for production. Firebase App Check enforcement, broader abuse monitoring, and a stronger operator factor or planned rotation are mandatory before deployment. The code is development-only until those protections are configured and tested.
+
+
+## App Check
+Every callable function is configured with `enforceAppCheck: true`. Both V2 clients contain App Check initialization, but the reCAPTCHA Enterprise site-key placeholder is intentionally empty. Until the owner registers the app and configures the key, callable requests fail closed. Do not disable enforcement to make the app appear functional.
