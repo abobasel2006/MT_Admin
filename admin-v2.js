@@ -1,4 +1,4 @@
-import { app, db, ref, onValue, auth, functions, signInWithCustomToken, setPersistence, browserSessionPersistence, httpsCallable } from "./src/firebase.js";
+import { app, db, ref, onValue, auth, functions, signInWithCustomToken, setPersistence, browserSessionPersistence, httpsCallable, signOut } from "./src/firebase.js";
 import { createDriver, updateDriver, createCar, updateCar, assignCarDrivers, deactivateDriver, deactivateCar } from "./src/domain/fleet-service.js";
 const $ = s => document.querySelector(s);
 const loginAdminWithPin = httpsCallable(functions, "loginAdminWithPin");
@@ -93,6 +93,7 @@ async function unlockAdminWorkspace() {
   adminListenersStarted = true;
   $("#unlockAdminBtn").textContent = "الإدارة مفتوحة";
   $("#unlockAdminBtn").disabled = true;
+  $("#lockAdminBtn").hidden = false;
   onValue(ref(db,"fleetState"), snap => {
   const v = snap.val() || {}; state.drivers = v.drivers || {}; state.cars = v.cars || {};
   $("#connection").textContent = "تحديث مباشر لبيانات الأسطول.";
@@ -112,4 +113,13 @@ async function unlockAdminWorkspace() {
 }
 $("#unlockAdminBtn").addEventListener("click", () => {
   unlockAdminWorkspace().catch(error => note(error.message || "تعذر فتح بيانات الإدارة.", true));
+});
+
+$("#lockAdminBtn").addEventListener("click", async () => {
+  try {
+    await signOut(auth);
+    location.reload();
+  } catch (error) {
+    note(error.message || "تعذر قفل لوحة الإدارة.", true);
+  }
 });
