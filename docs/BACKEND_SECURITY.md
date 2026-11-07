@@ -33,3 +33,11 @@ The initial shift functions use a Realtime Database root transaction so fleet as
 - Five consecutive failures for a driver trigger a 15-minute lockout. This per-driver throttle is not a substitute for App Check and broader abuse monitoring.
 - Before deployment, create the `MT_TAXI_PIN_PEPPER` secret in the Firebase/GCP project. Do not commit it or send it in chat.
 - The admin claim must be provisioned by a trusted server-side process. The current admin page has not yet been wired to this function, and the driver page has not yet been migrated to PIN login. Do not deploy or treat this as a complete login flow until those client changes, App Check, and emulator tests are complete.
+
+
+## Temporary management-page access model
+The management page itself loads without a sign-in screen. Its private fleet and shift data are not loaded until the operator selects **فتح بيانات الإدارة**. The operator then confirms the temporary four-digit admin PIN; the backend verifies it and issues a short-lived Firebase custom-token session with the server-controlled `role: "admin"` claim. The session uses browser-session persistence. Protected management actions also pass through this gate.
+
+The temporary admin PIN is read only from Firebase Secret Manager under `MT_TAXI_ADMIN_PIN`; it must never be added to the web app, source control, or browser storage. The owner must set that secret out-of-band. The current source does not contain the PIN value.
+
+**Security limitation:** a four-digit PIN has only 10,000 possibilities. The current callable includes an IP-based 5-attempt/15-minute throttle, but this is not sufficient by itself for production. Firebase App Check enforcement, broader abuse monitoring, and a stronger operator factor or planned rotation are mandatory before deployment. The code is development-only until those protections are configured and tested.
