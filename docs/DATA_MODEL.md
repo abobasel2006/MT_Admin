@@ -11,7 +11,7 @@ This schema is for the new project only. Never point the legacy MT TAXI apps at 
 - `drivers/{driverId}`: stable ID, display name, contact fields, active flag, assigned car/shift metadata.
 - `cars/{carId}`: plate, model, active flag, `dayDriverId`, `nightDriverId`.
 - `shifts/{shiftId}`: immutable identity plus driverId, carId, shiftType, startAt, endAt, startOdometer, endOdometer, status, finalization metadata.
-- `shiftLocks/{carId}/{shiftType}`: transactional reservation for exactly one active shift per car and shift type. Day and night shifts on the same car may run concurrently.
+- `activeShifts/{carId}/{shiftType}`: transactional reservation for exactly one active shift per car and shift type. Day and night shifts on the same car may run concurrently.
 - `weeklyRecords/{weekId}/{driverId}`: derived weekly totals and display summaries; transaction ledger remains the financial source of truth.
 - `financialTransactions/{transactionId}`: append-only ledger entries with type, amount, driverId, effectiveAt, weekId, note, createdAt, createdByLabel, idempotencyKey.
 - `processedOperations/{operationId}`: idempotency markers for retried financial/admin operations.
