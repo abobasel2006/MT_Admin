@@ -1,9 +1,11 @@
-# Shift lifecycle — first implementation
+# Shift lifecycle — transactional implementation
 
-- Lock key: `activeShifts/{carId}/{shiftType}`.
-- Valid shift types: `day` and `night`.
-- A Realtime Database transaction reserves the exact car/shift slot.
-- The same car may have its day and night shifts active simultaneously.
-- A failed history write attempts a guarded rollback that only releases its own lock.
-- This is a concurrency mechanism, not authorization. Do not treat client-provided driver IDs as proof of identity.
-- Ending/finalizing a shift, calculating elapsed hours, and writing payroll transactions are not implemented in this first increment and must be added with idempotency before operational use.
+- State root: `shiftState`.
+- `activeByCar/{carId}__{shiftType}` permits one day and one night shift per car.
+- `activeByDriver/{driverId}` prevents one driver from starting shifts on multiple cars.
+- `history/{shiftId}` stores the record using `startedAt` and `endedAt` consistently.
+- Start reserves the car slot, driver slot, and creates history in one RTDB transaction.
+- End finalizes the exact shift and releases only matching reservations in one RTDB transaction.
+- Repeated end requests are idempotent.
+- This is a client-side concurrency guard, not authorization.
+- Finance/payroll integration and automated concurrency tests remain pending.
