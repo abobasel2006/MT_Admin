@@ -1,0 +1,9 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "mt-taxi-2",
+      "runtime": "nodejs22"
+    }
+  ]
+}
