@@ -1,6 +1,14 @@
 {
   "rules": {
     ".read": false,
-    ".write": false
+    ".write": false,
+    "fleetState": {
+      ".read": "auth != null && auth.token.role === 'admin'",
+      ".write": "auth != null && auth.token.role === 'admin'"
+    },
+    "shiftState": {
+      ".read": "auth != null && auth.token.role === 'admin'",
+      ".write": false
+    }
   }
 }
