@@ -701,7 +701,7 @@
                 alert(`تم إنهاء وردية السائق (${driverName}) وتسجيل ساعاتها وتحرير السيارة بنجاح.`);
             } catch (err) {
                 console.error('Admin shift finalization failed:', err);
-                alert('تعذر إنهاء الوردية: ' + (err && err.message ? err.message : err) + '\\nلم يتم حذف بيانات السائق. يمكنك إعادة المحاولة بعد التحقق من الاتصال.');
+                alert('تعذر إنهاء الوردية: ' + (err && err.message ? err.message : err) + '\nلم يتم حذف بيانات السائق. يمكنك إعادة المحاولة بعد التحقق من الاتصال.');
             } finally {
                 pendingAdminShiftEnds.delete(carId);
             }
