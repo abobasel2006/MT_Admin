@@ -5,6 +5,91 @@ const { getDatabase } = require("firebase-admin/database");
 initializeApp();
 const database = getDatabase();
 
+const crypto = require("node:crypto");
+const { defineSecret } = require("firebase-functions/params");
+const pinPepper = defineSecret("MT_TAXI_PIN_PEPPER");
+
+function pinDigest(pin, salt, pepper) {
+  return crypto.scryptSync(pin, Buffer.concat([Buffer.from(salt, "hex"), Buffer.from(pepper)]), 64).toString("hex");
+}
+
+function requireFourDigitPin(pin) {
+  if (typeof pin !== "string" || !/^\\d{4}$/.test(pin)) {
+    throw new HttpsError("invalid-argument", "رمز PIN يجب أن يتكون من أربعة أرقام فقط.");
+  }
+}
+
+exports.setDriverPin = onCall({ region: "europe-west1", secrets: [pinPepper] }, async (request) => {
+  requireIdentity(request, "admin");
+  const { driverId, pin } = request.data || {};
+  requireFourDigitPin(pin);
+  if (typeof driverId !== "string" || !driverId.trim()) {
+    throw new HttpsError("invalid-argument", "معرّف السائق غير صحيح.");
+  }
+  const driverRef = database.ref("fleetState/drivers/" + driverId.trim());
+  const driverSnap = await driverRef.get();
+  if (!driverSnap.exists() || driverSnap.val()?.active !== true) {
+    throw new HttpsError("not-found", "السائق غير موجود أو غير نشط.");
+  }
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = pinDigest(pin, salt, pinPepper.value());
+  await database.ref("security/driverPins/" + driverId.trim()).set({
+    salt, hash, updatedAt: Date.now(), version: 1
+  });
+  await database.ref("security/pinAttempts/" + driverId.trim()).remove();
+  return { success: true };
+});
+
+exports.loginWithPin = onCall({ region: "europe-west1", secrets: [pinPepper] }, async (request) => {
+  const { driverId, pin } = request.data || {};
+  requireFourDigitPin(pin);
+  if (typeof driverId !== "string" || !driverId.trim()) {
+    throw new HttpsError("invalid-argument", "بيانات الدخول غير صحيحة.");
+  }
+  const id = driverId.trim();
+  const [driverSnap, pinSnap, attemptsSnap] = await Promise.all([
+    database.ref("fleetState/drivers/" + id).get(),
+    database.ref("security/driverPins/" + id).get(),
+    database.ref("security/pinAttempts/" + id).get()
+  ]);
+  const driver = driverSnap.val();
+  const stored = pinSnap.val();
+  const attempts = attemptsSnap.val() || {};
+  const now = Date.now();
+
+  if (!driver || driver.active !== true || !stored?.salt || !stored?.hash) {
+    throw new HttpsError("permission-denied", "اسم السائق أو الرمز غير صحيح.");
+  }
+  if (Number(attempts.lockUntil || 0) > now) {
+    throw new HttpsError("resource-exhausted", "تم إيقاف المحاولة مؤقتاً. حاول لاحقاً.");
+  }
+
+  const calculated = pinDigest(pin, stored.salt, pinPepper.value());
+  const expected = Buffer.from(stored.hash, "hex");
+  const actual = Buffer.from(calculated, "hex");
+  const matches = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+
+  if (!matches) {
+    await database.ref("security/pinAttempts/" + id).transaction(current => {
+      const state = current || { failures: 0, lockUntil: 0 };
+      if (Number(state.lockUntil || 0) > Date.now()) return state;
+      const failures = Number(state.failures || 0) + 1;
+      return {
+        failures: failures >= 5 ? 0 : failures,
+        lockUntil: failures >= 5 ? Date.now() + 15 * 60 * 1000 : 0
+      };
+    }, undefined, false);
+    throw new HttpsError("permission-denied", "اسم السائق أو الرمز غير صحيح.");
+  }
+
+  await database.ref("security/pinAttempts/" + id).remove();
+  const token = await require("firebase-admin/auth").getAuth().createCustomToken(id, {
+    role: "driver", driverId: id
+  });
+  return { token };
+});
+
+
 function requireIdentity(request, role) {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "يلزم تسجيل هوية موثوقة للوصول إلى الخدمة.");
