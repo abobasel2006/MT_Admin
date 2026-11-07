@@ -44,4 +44,4 @@ The temporary admin PIN is read only from Firebase Secret Manager under `MT_TAXI
 
 
 ## App Check
-Every callable function is configured with `enforceAppCheck: true`. Both V2 clients contain App Check initialization, but the reCAPTCHA Enterprise site-key placeholder is intentionally empty. Until the owner registers the app and configures the key, callable requests fail closed. Do not disable enforcement to make the app appear functional.
+Every callable function is configured with `enforceAppCheck: true`. Both V2 clients contain App Check initialization, but the reCAPTCHA v3 site-key placeholder is intentionally empty. Until the owner registers the app and configures the key, callable requests fail closed. Do not disable enforcement to make the app appear functional.
