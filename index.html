@@ -765,9 +765,18 @@
                 targetCar.nightDriver = { name: driverName, phone: targetPhone };
             }
 
+            const targetSlot = targetShiftType === 'day' ? targetCar.dayDriver : targetCar.nightDriver;
+            if (targetSlot && targetSlot.name) return alert('مكان الوردية المستهدفة مشغول بسائق آخر.');
             db.ref('cars').set(window.appState.cars).then(() => {
                 closeModal('transferDriverModal');
-                alert(`✅ تم نقل السائق (${driverName}) بنجاح إلى السيارة الجديدة مع الاحتفاظ بكافة بياناته ورصيده وساعاته!`);
+                renderApp();
+                alert('تم نقل السائق بنجاح مع الاحتفاظ بسجلاته المالية.');
+            }).catch(err => {
+                alert('تعذر نقل السائق: ' + (err && err.message ? err.message : err));
+                db.ref('cars').once('value').then(snapshot => {
+                    window.appState.cars = snapshot.val() || [];
+                    renderApp();
+                }).catch(() => {});
             });
         };
 
@@ -894,7 +903,6 @@
                 if (isOnDuty) {
                     const shiftData = activeMatch.value;
                     shiftStartTime = getActiveShiftStartTime(shiftData) || rec.imgTimestamp || adminShiftStartTimes[d.name] || Date.now();
-                    shiftStartTime = (typeof shiftData === 'object' && shiftData !== null) ? shiftData.timestamp : (rec.imgTimestamp || adminShiftStartTimes[d.name] || Date.now());
                     if (!adminShiftStartTimes[d.name]) adminShiftStartTimes[d.name] = shiftStartTime;
                     liveSecs = Math.max(0, Math.floor((Date.now() - shiftStartTime) / 1000));
                 } else {
@@ -1099,8 +1107,15 @@
             }
             db.ref('cars').set(window.appState.cars).then(() => {
                 closeModal('carModal');
+                renderApp();
                 alert('تم حفظ بيانات السيارة والسائقين بنجاح.');
-            }).catch(err => alert('تعذر حفظ بيانات السيارة: ' + err.message));
+            }).catch(err => {
+                alert('تعذر حفظ بيانات السيارة والسائقين: ' + (err && err.message ? err.message : err));
+                db.ref('cars').once('value').then(snapshot => {
+                    window.appState.cars = snapshot.val() || [];
+                    renderApp();
+                }).catch(() => {});
+            });
         }
 
         window.askDeleteCar = function(carId) {
@@ -1112,7 +1127,16 @@
             pendingDeleteAction = () => {
                 if (window.appState.activeShifts[String(carId)]) return alert('بدأت وردية جديدة لهذه السيارة. ألغيت عملية الحذف.');
                 window.appState.cars = window.appState.cars.filter(c => String(c.id) !== String(carId));
-                db.ref('cars').set(window.appState.cars);
+                db.ref('cars').set(window.appState.cars).then(() => {
+                    renderApp();
+                    alert('تمت حذف السيارة بنجاح.');
+                }).catch(err => {
+                    alert('تعذرت العملية: ' + (err && err.message ? err.message : err));
+                    db.ref('cars').once('value').then(snapshot => {
+                        window.appState.cars = snapshot.val() || [];
+                        renderApp();
+                    }).catch(() => {});
+                });
             };
             openModal('deleteModal');
         }
@@ -1127,7 +1151,16 @@
                 if (window.appState.activeShifts[String(carId)]) return alert('بدأت وردية جديدة لهذه السيارة. ألغيت عملية الإزالة.');
                 if (shiftType === 'day') car.dayDriver = { name: "", phone: "" };
                 if (shiftType === 'night') car.nightDriver = { name: "", phone: "" };
-                db.ref('cars').set(window.appState.cars);
+                db.ref('cars').set(window.appState.cars).then(() => {
+                    renderApp();
+                    alert('تمت إزالة السائق بنجاح.');
+                }).catch(err => {
+                    alert('تعذرت العملية: ' + (err && err.message ? err.message : err));
+                    db.ref('cars').once('value').then(snapshot => {
+                        window.appState.cars = snapshot.val() || [];
+                        renderApp();
+                    }).catch(() => {});
+                });
             };
             openModal('deleteModal');
         }
