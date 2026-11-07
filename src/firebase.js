@@ -13,7 +13,7 @@ import { getDatabase, ref, get, onValue, push, set, update, runTransaction, serv
 import { getAuth, signInWithCustomToken, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-functions.js";
 
-export const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig, "mt-admin-v2");
 export const db = getDatabase(app);
 export const auth = getAuth(app);
 export const functions = getFunctions(app, "europe-west1");
