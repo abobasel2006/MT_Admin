@@ -377,7 +377,8 @@
                 }
             });
         }
-        setInterval(measureConnectionLatency, 5000);
+        // A small connectivity probe is enough; avoid a database read every five seconds.
+        setInterval(measureConnectionLatency, 30000);
 
         function escapeHtml(value) {
             return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -426,9 +427,20 @@
         }
 
         window.currentActiveWeek = getSaturdayWeekId();
+        let knownWeeklyRecordIds = [];
+        try {
+            knownWeeklyRecordIds = JSON.parse(localStorage.getItem('mt_admin_week_ids') || '[]');
+            if (!Array.isArray(knownWeeklyRecordIds)) knownWeeklyRecordIds = [];
+        } catch (_) { knownWeeklyRecordIds = []; }
+
+        function readCachedWeek(weekId) {
+            try { return JSON.parse(localStorage.getItem('mt_admin_week_' + weekId) || 'null') || {}; }
+            catch (_) { return {}; }
+        }
+
         window.appState = {
             cars: JSON.parse(localStorage.getItem('mt_admin_cars') || '[]'),
-            weeklyRecords: JSON.parse(localStorage.getItem('mt_admin_records') || '{}'),
+            weeklyRecords: { [window.currentActiveWeek]: readCachedWeek(window.currentActiveWeek) },
             activeShifts: JSON.parse(localStorage.getItem('mt_admin_shifts') || '{}'),
             pendingAdvances: {},
             driverNotes: {}
@@ -437,7 +449,7 @@
         let pendingDeleteAction = null;
         let adminShiftStartTimes = {};
 
-        if (window.appState.cars.length > 0 || Object.keys(window.appState.weeklyRecords).length > 0) {
+        if (window.appState.cars.length > 0 || Object.keys(window.appState.weeklyRecords[window.currentActiveWeek] || {}).length > 0) {
             renderApp();
         }
 
@@ -454,14 +466,29 @@
             renderWeeklyFinancialList();
         });
 
-        db.ref('weeklyRecords').on('value', (snapshot) => {
-            const remoteRecords = snapshot.val() || {};
+        let weeklyRecordsListenerRef = null;
+        function subscribeToSelectedWeek() {
             const weekId = window.currentActiveWeek;
-            window.appState.weeklyRecords = remoteRecords;
-            localStorage.setItem('mt_admin_records', JSON.stringify(window.appState.weeklyRecords));
-            renderWeeklyFinancialList();
-            renderAdvanceNotifications();
-        });
+            if (weeklyRecordsListenerRef) weeklyRecordsListenerRef.off('value');
+            if (!window.appState.weeklyRecords) window.appState.weeklyRecords = {};
+            window.appState.weeklyRecords[weekId] = readCachedWeek(weekId);
+            weeklyRecordsListenerRef = db.ref('weeklyRecords/' + weekId);
+            weeklyRecordsListenerRef.on('value', (snapshot) => {
+                const weekData = snapshot.val() || {};
+                window.appState.weeklyRecords[weekId] = weekData;
+                localStorage.setItem('mt_admin_week_' + weekId, JSON.stringify(weekData));
+                if (!knownWeeklyRecordIds.includes(weekId)) {
+                    knownWeeklyRecordIds.push(weekId);
+                    knownWeeklyRecordIds = knownWeeklyRecordIds.slice(-300);
+                    localStorage.setItem('mt_admin_week_ids', JSON.stringify(knownWeeklyRecordIds));
+                }
+                if (window.currentActiveWeek !== weekId) return;
+                renderWeeklyFinancialList();
+                renderAdvanceNotifications();
+                renderWeekSelector();
+            });
+        }
+        subscribeToSelectedWeek();
 
         db.ref('pendingAdvances').on('value', (snapshot) => {
             window.appState.pendingAdvances = snapshot.val() || {};
@@ -1288,9 +1315,16 @@
             const selector = document.getElementById('weekSelector');
             if (!selector) return;
             const thisWeek = getSaturdayWeekId();
-            let weeks = Object.keys(window.appState.weeklyRecords);
-            if (!weeks.includes(thisWeek)) weeks.push(thisWeek);
-            weeks.sort().reverse();
+            const weeksSet = new Set(knownWeeklyRecordIds);
+            weeksSet.add(thisWeek);
+            weeksSet.add(window.currentActiveWeek);
+            // Offer a five-year archive window without downloading its records.
+            for (let i = 0; i < 260; i++) {
+                const date = new Date();
+                date.setDate(date.getDate() - i * 7);
+                weeksSet.add(getSaturdayWeekId(date));
+            }
+            let weeks = Array.from(weeksSet).sort().reverse();
 
             selector.replaceChildren();
             weeks.forEach(w => {
@@ -1303,6 +1337,7 @@
         window.changeWeekView = function() {
             const selector = document.getElementById('weekSelector');
             if (selector) window.currentActiveWeek = selector.value;
+            subscribeToSelectedWeek();
             renderWeeklyFinancialList();
             renderAdvanceNotifications();
         }
