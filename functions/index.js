@@ -268,7 +268,7 @@ exports.loginAdminWithPin = onCall(
       throw new HttpsError("resource-exhausted", "محاولات كثيرة. أعد المحاولة بعد 15 دقيقة.");
     }
 
-    const expected = Buffer.from(adminPinSecret.value(), "utf8");
+    const expected = Buffer.from(String(adminPinSecret.value()).trim(), "utf8");
     const actual = Buffer.from(supplied, "utf8");
     const matches = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
     if (!matches) {
