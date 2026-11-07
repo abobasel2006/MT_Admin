@@ -12,13 +12,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/13.2.0/firebas
 import { getDatabase, ref, get, onValue, push, set, update, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-database.js";
 import { getAuth, signInWithCustomToken, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-auth.js";
 import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-functions.js";
-import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-app-check.js";
+import { initializeAppCheck, ReCaptchaV3Provider } from "https://www.gstatic.com/firebasejs/13.2.0/firebase-app-check.js";
 
 export const app = initializeApp(firebaseConfig, "mt-admin-v2");
 // Configure this public site key from Firebase App Check before deployment.
 const appCheckSiteKey = "";
 export const appCheck = appCheckSiteKey
-  ? initializeAppCheck(app, { provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey), isTokenAutoRefreshEnabled: true })
+  ? initializeAppCheck(app, { provider: new ReCaptchaV3Provider(appCheckSiteKey), isTokenAutoRefreshEnabled: true })
   : null;
 export const db = getDatabase(app);
 export const auth = getAuth(app);
