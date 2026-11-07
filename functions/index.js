@@ -8,6 +8,7 @@ const database = getDatabase();
 const crypto = require("node:crypto");
 const { defineSecret } = require("firebase-functions/params");
 const pinPepper = defineSecret("MT_TAXI_PIN_PEPPER");
+const adminPinSecret = defineSecret("MT_TAXI_ADMIN_PIN");
 
 function pinDigest(pin, salt, pepper) {
   return crypto.scryptSync(pin, Buffer.concat([Buffer.from(salt, "hex"), Buffer.from(pepper)]), 64).toString("hex");
@@ -230,3 +231,54 @@ exports.endShift = onCall({ region: "europe-west1" }, async (request) => {
   }
   return finalized;
 });
+
+
+// Temporary admin step-up authentication. The PIN is supplied only through
+// Secret Manager; it is never embedded in browser assets or repository files.
+exports.loginAdminWithPin = onCall(
+  { region: "europe-west1", secrets: [adminPinSecret] },
+  async (request) => {
+    const supplied = request.data?.pin;
+    if (typeof supplied !== "string" || !/^\d{4}$/.test(supplied)) {
+      throw new HttpsError("invalid-argument", "رمز الإدارة يجب أن يتكون من أربعة أرقام.");
+    }
+
+    const ip = String(request.rawRequest?.ip || "unknown");
+    const ipKey = crypto.createHash("sha256").update(ip).digest("hex").slice(0, 40);
+    const attemptRef = database.ref("security/adminPinAttempts/" + ipKey);
+    const now = Date.now();
+    let blocked = false;
+
+    const attemptResult = await attemptRef.transaction(current => {
+      const state = current || { failures: 0, windowStartedAt: now, lockUntil: 0 };
+      if (Number(state.lockUntil || 0) > now) {
+        blocked = true;
+        return;
+      }
+      const windowExpired = now - Number(state.windowStartedAt || 0) > 15 * 60 * 1000;
+      const failures = windowExpired ? 1 : Number(state.failures || 0) + 1;
+      return {
+        failures: failures >= 5 ? 0 : failures,
+        windowStartedAt: windowExpired ? now : Number(state.windowStartedAt || now),
+        lockUntil: failures >= 5 ? now + 15 * 60 * 1000 : 0
+      };
+    }, undefined, false);
+
+    if (blocked || !attemptResult.committed) {
+      throw new HttpsError("resource-exhausted", "محاولات كثيرة. أعد المحاولة بعد 15 دقيقة.");
+    }
+
+    const expected = Buffer.from(adminPinSecret.value(), "utf8");
+    const actual = Buffer.from(supplied, "utf8");
+    const matches = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+    if (!matches) {
+      throw new HttpsError("permission-denied", "رمز الإدارة غير صحيح.");
+    }
+
+    await attemptRef.remove();
+    const token = await require("firebase-admin/auth").getAuth().createCustomToken("mt-taxi-admin", {
+      role: "admin"
+    });
+    return { token };
+  }
+);
