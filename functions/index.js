@@ -24,10 +24,8 @@ exports.setDriverPin = onCall({ region: "europe-west1", enforceAppCheck: true, s
   requireIdentity(request, "admin");
   const { driverId, pin } = request.data || {};
   requireFourDigitPin(pin);
-  if (typeof driverId !== "string" || !driverId.trim()) {
-    throw new HttpsError("invalid-argument", "معرّف السائق غير صحيح.");
-  }
-  const driverRef = database.ref("fleetState/drivers/" + driverId.trim());
+  const id = adminId(driverId, "السائق");
+  const driverRef = database.ref("fleetState/drivers/" + id);
   const driverSnap = await driverRef.get();
   if (!driverSnap.exists() || driverSnap.val()?.active !== true) {
     throw new HttpsError("not-found", "السائق غير موجود أو غير نشط.");
@@ -37,17 +35,14 @@ exports.setDriverPin = onCall({ region: "europe-west1", enforceAppCheck: true, s
   await database.ref("security/driverPins/" + driverId.trim()).set({
     salt, hash, updatedAt: Date.now(), version: 1
   });
-  await database.ref("security/pinAttempts/" + driverId.trim()).remove();
+  await database.ref("security/pinAttempts/" + id).remove();
   return { success: true };
 });
 
 exports.loginWithPin = onCall({ region: "europe-west1", enforceAppCheck: true, secrets: [pinPepper] }, async (request) => {
   const { driverId, pin } = request.data || {};
   requireFourDigitPin(pin);
-  if (typeof driverId !== "string" || !driverId.trim()) {
-    throw new HttpsError("invalid-argument", "بيانات الدخول غير صحيحة.");
-  }
-  const id = driverId.trim();
+  const id = adminId(driverId, "السائق");
   const [driverSnap, pinSnap, attemptsSnap] = await Promise.all([
     database.ref("fleetState/drivers/" + id).get(),
     database.ref("security/driverPins/" + id).get(),
