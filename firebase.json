@@ -5,5 +5,19 @@
       "codebase": "mt-taxi-2",
       "runtime": "nodejs22"
     }
-  ]
+  ],
+  "emulators": {
+    "auth": {
+      "port": 9099
+    },
+    "functions": {
+      "port": 5001
+    },
+    "database": {
+      "port": 9000
+    },
+    "ui": {
+      "enabled": true
+    }
+  }
 }
