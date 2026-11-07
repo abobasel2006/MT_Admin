@@ -624,8 +624,19 @@
                 }
 
                 const liveStartTime = getActiveShiftStartTime(liveShift);
-                const fallbackStartTime = Number(adminShiftStartTimes[driverName] || 0);
-                const startTime = liveStartTime || fallbackStartTime;
+                const weekRecord = ((window.appState.weeklyRecords || {})[window.currentActiveWeek] || {})[driverName] || {};
+                const openDayStarts = Object.values(weekRecord.days || {})
+                    .filter(day => day && Number(day.startTime) > 0 && !Number(day.endTime))
+                    .map(day => Number(day.startTime))
+                    .sort((a, b) => b - a);
+                const persistedFallback = Number(
+                    weekRecord.imgTimestamp ||
+                    weekRecord.odoStartTimestamp ||
+                    weekRecord.lastShiftStart ||
+                    openDayStarts[0] ||
+                    0
+                );
+                const startTime = liveStartTime || persistedFallback;
                 if (!Number.isFinite(startTime) || startTime <= 0 || startTime > Date.now()) {
                     throw new Error('سجل الوردية لا يحتوي وقت بدء صالحاً. لم يتم حذف الوردية أو تغيير سجل السائق.');
                 }
