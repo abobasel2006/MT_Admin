@@ -383,6 +383,10 @@
             return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
         }
 
+        function inlineArg(value) {
+            return escapeHtml(JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026'));
+        }
+
         function formatTime(timestamp) {
             if (!timestamp) return '--:--';
             const date = new Date(timestamp);
@@ -473,44 +477,118 @@
             renderWeeklyFinancialList();
         });
 
+
+        // Apply a shift's financial effect once per week. The marker and totals
+        // are committed in the same transaction, so retries cannot add hours twice.
+        async function applyShiftHoursOnce(driverName, carId, startTime, endTime, shiftData, includeEndOdometer) {
+            const safeCarId = String(carId).split('').map(ch => '.#$ /[]'.includes(ch) ? '_' : ch).join('');
+            const shiftId = 'shift_' + safeCarId + '_' + startTime;
+            const totals = {};
+            let cursor = startTime;
+            while (cursor < endTime) {
+                const day = new Date(cursor);
+                const nextDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
+                const segmentEnd = Math.min(endTime, nextDay);
+                const week = getSaturdayWeekId(new Date(cursor));
+                const dayKey = localDateKey(new Date(cursor));
+                if (!totals[week]) totals[week] = {};
+                totals[week][dayKey] = (totals[week][dayKey] || 0) + (segmentEnd - cursor) / 3600000;
+                cursor = segmentEnd;
+            }
+
+            const endWeek = getSaturdayWeekId(new Date(endTime));
+            const endDay = localDateKey(new Date(endTime));
+            if (!totals[endWeek]) totals[endWeek] = {};
+            await Promise.all(Object.entries(totals).map(([weekId, days]) => {
+                const recordRef = db.ref(`weeklyRecords/${weekId}/${driverName}`);
+                return recordRef.transaction(current => {
+                    const record = current || {};
+                    if (record.processedShiftIds && record.processedShiftIds[shiftId]) return;
+                    const next = { ...record };
+                    next.processedShiftIds = { ...(record.processedShiftIds || {}), [shiftId]: true };
+                    const weekHours = Object.values(days).reduce((sum, value) => sum + value, 0);
+                    next.hours = (Number(record.hours) || 0) + weekHours;
+                    const todayHours = days[endDay] || 0;
+                    if (todayHours) next.todayHours = (Number(record.todayHours) || 0) + todayHours;
+                    next.days = { ...(record.days || {}) };
+                    Object.entries(days).forEach(([dayKey, hours]) => {
+                        const dayRecord = { ...(next.days[dayKey] || {}) };
+                        const dayStart = new Date(dayKey + 'T00:00:00');
+                        const nextMidnight = new Date(dayStart.getFullYear(), dayStart.getMonth(), dayStart.getDate() + 1).getTime();
+                        dayRecord.endTime = Math.min(endTime, nextMidnight);
+                        dayRecord.hours = hours;
+                        dayRecord.status = 'present';
+                        if (dayKey === localDateKey(new Date(startTime))) {
+                            dayRecord.startTime = startTime;
+                            if (shiftData.odoStartImg) dayRecord.odoStartImg = shiftData.odoStartImg;
+                        }
+                        if (includeEndOdometer && dayKey === endDay && shiftData.endOdoImg) dayRecord.odoEndImg = shiftData.endOdoImg;
+                        next.days[dayKey] = dayRecord;
+                    });
+                    if (!next.days[endDay]) {
+                        const endingDay = { ...(next.days[endDay] || {}) };
+                        endingDay.endTime = endTime;
+                        if (includeEndOdometer && shiftData.endOdoImg) endingDay.odoEndImg = shiftData.endOdoImg;
+                        next.days[endDay] = endingDay;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(days, localDateKey(new Date(startTime)))) {
+                        next.odoStartImg = shiftData.odoStartImg || '';
+                        next.odoStartTimestamp = startTime;
+                    }
+                    if (weekId === endWeek) {
+                        next.lastShiftStart = startTime;
+                        next.lastShiftEnd = endTime;
+                        if (includeEndOdometer) {
+                            next.odoEndImg = shiftData.endOdoImg || '';
+                            next.odoEndTimestamp = endTime;
+                        }
+                    }
+                    return next;
+                }).then(result => {
+                    if (!result.committed) {
+                        const value = result.snapshot && result.snapshot.val();
+                        if (!value || !value.processedShiftIds || value.processedShiftIds[shiftId] !== true) {
+                            throw new Error('تعذر تثبيت سجل ساعات الوردية للأسبوع ' + weekId);
+                        }
+                    }
+                });
+            }));
+
+            // Clear only the exact shift that was finalized; never clear a newer shift.
+            const clearResult = await db.ref(`activeShifts/${carId}`).transaction(current => {
+                if (!current || Number(current.timestamp) !== startTime || current.driver !== driverName) return;
+                return null;
+            });
+            if (!clearResult.committed && clearResult.snapshot && clearResult.snapshot.exists()) {
+                throw new Error('تم حفظ الساعات، لكن تغيرت حالة السيارة قبل تحرير الوردية. راجع الحالة قبل أي إجراء يدوي.');
+            }
+            return shiftId;
+        }
+
         window.adminEndShift = function(carId, driverName) {
             if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
-            const cachedShift = window.appState.activeShifts[String(carId)] || window.appState.activeShifts[carId] || {};
+            carId = String(carId);
+            const cachedShift = window.appState.activeShifts[carId] || {};
             const startTime = Number(cachedShift.timestamp || adminShiftStartTimes[driverName]);
             if (!startTime) return alert('تعذر تحديد وقت بدء الوردية. لم يتم إجراء أي تغيير.');
-            const endTime = Date.now();
+            const requestedEndTime = Date.now();
+            const finalizationToken = `${Date.now()}-${Math.random()}`;
             const shiftRef = db.ref(`activeShifts/${carId}`);
             shiftRef.transaction(current => {
                 if (!current || current.driver !== driverName || Number(current.timestamp) !== startTime) return;
-                return null;
-            }).then(result => {
-                if (!result.committed) return alert('لم تعد هناك وردية نشطة مطابقة. ربما أنهاها السائق بالفعل.');
-                const totals = {};
-                let cursor = startTime;
-                while (cursor < endTime) {
-                    const day = new Date(cursor);
-                    const nextDay = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1).getTime();
-                    const segmentEnd = Math.min(endTime, nextDay);
-                    const week = getSaturdayWeekId(new Date(cursor));
-                    const dayKey = localDateKey(new Date(cursor));
-                    if (!totals[week]) totals[week] = {};
-                    totals[week][dayKey] = (totals[week][dayKey] || 0) + (segmentEnd - cursor) / 3600000;
-                    cursor = segmentEnd;
+                if (current.status === 'finalizing') {
+                    const stale = Date.now() - Number(current.finalizingAt || 0) > 120000;
+                    if (current.finalizedBy !== 'admin' || !stale) return;
+                    return { ...current, finalizingAt: Date.now(), finalizationToken };
                 }
-                const updates = {};
-                Object.entries(totals).forEach(([week, days]) => Object.entries(days).forEach(([dayKey, hours]) => {
-                    updates[`weeklyRecords/${week}/${driverName}/hours`] = firebase.database.ServerValue.increment(hours);
-                    if (dayKey === localDateKey(new Date(endTime))) updates[`weeklyRecords/${week}/${driverName}/todayHours`] = firebase.database.ServerValue.increment(hours);
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/hours`] = hours;
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/status`] = 'present';
-                    updates[`weeklyRecords/${week}/${driverName}/days/${dayKey}/endTime`] = Math.min(endTime, new Date(new Date(dayKey + 'T00:00:00').getFullYear(), new Date(dayKey + 'T00:00:00').getMonth(), new Date(dayKey + 'T00:00:00').getDate() + 1).getTime());
-                }));
-                const endWeek = getSaturdayWeekId(new Date(endTime));
-                const endDay = localDateKey(new Date(endTime));
-                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftStart`] = startTime;
-                updates[`weeklyRecords/${endWeek}/${driverName}/lastShiftEnd`] = endTime;
-                updates[`weeklyRecords/${endWeek}/${driverName}/days/${endDay}/endTime`] = endTime;
-                return db.ref().update(updates).then(() => {
+                return { ...current, status: 'finalizing', finalizedBy: 'admin', finalizingAt: Date.now(), finalizationToken, endTime: requestedEndTime };
+            }).then(result => {
+                if (!result.committed || result.snapshot.val()?.finalizationToken !== finalizationToken) return alert('لم تعد هناك وردية نشطة مطابقة، أو أن الإنهاء جارٍ من جهاز آخر. أعد المحاولة لاحقاً إذا بقيت عالقة.');
+                const finalShift = result.snapshot.val();
+                if (!finalShift || finalShift.finalizedBy !== 'admin') throw new Error('يجري إنهاء الوردية من جهة أخرى.');
+                const finalEndTime = Number(finalShift.endTime);
+                if (!finalEndTime || finalEndTime <= startTime) throw new Error('وقت إنهاء الوردية غير صالح.');
+                return applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, finalShift, false).then(() => {
                     delete adminShiftStartTimes[driverName];
                     alert(`تم إنهاء وردية السائق (${driverName}) وتوزيع ساعاتها على الأيام والأسابيع الصحيحة.`);
                 });
@@ -536,22 +614,42 @@
             }
         }
 
+
         window.approveAdvance = function(weekId, requestId) {
             const requestRef = db.ref(`pendingAdvances/${weekId}/${requestId}`);
             requestRef.transaction(current => {
                 if (!current || !['pending', 'approving'].includes(current.status)) return;
                 return { ...current, status: 'approving', reviewedAt: current.reviewedAt || Date.now() };
             }).then(result => {
-                if (!result.committed) return alert('هذا الطلب تمت معالجته مسبقاً أو لم يعد متاحاً.');
+                if (!result.committed) {
+                    const existing = result.snapshot && result.snapshot.val();
+                    if (existing && existing.status === 'approved') return alert('هذا الطلب معتمد مسبقاً.');
+                    return alert('هذا الطلب تمت معالجته مسبقاً أو لم يعد متاحاً.');
+                }
                 const req = result.snapshot.val();
                 const amount = Number(req.amount);
                 if (!req.driver || !Number.isFinite(amount) || amount <= 0) throw new Error('بيانات طلب السلفة غير صحيحة.');
-                const updates = {};
-                updates[`weeklyRecords/${weekId}/${req.driver}/advances`] = firebase.database.ServerValue.increment(amount);
-                updates[`pendingAdvances/${weekId}/${requestId}/status`] = 'approved';
-                updates[`pendingAdvances/${weekId}/${requestId}/approvedAt`] = Date.now();
-                return db.ref().update(updates).then(() => alert(`تمت الموافقة على سلفة ${req.driver} بقيمة ${amount.toLocaleString()} ل.س.`));
-            }).catch(err => alert('تعذرت الموافقة. إذا بقي الطلب بحالة «قيد الاعتماد»، أعد محاولة الاعتماد من لوحة الإدارة: ' + err.message));
+                const driverRef = db.ref(`weeklyRecords/${weekId}/${req.driver}`);
+                return driverRef.transaction(current => {
+                    const record = current || {};
+                    const processed = record.processedAdvanceRequestIds || {};
+                    if (processed[requestId]) return;
+                    return {
+                        ...record,
+                        advances: (Number(record.advances) || 0) + amount,
+                        processedAdvanceRequestIds: { ...processed, [requestId]: true }
+                    };
+                }).then(ledgerResult => {
+                    if (!ledgerResult.committed) {
+                        const saved = ledgerResult.snapshot && ledgerResult.snapshot.val();
+                        if (!saved || !saved.processedAdvanceRequestIds || saved.processedAdvanceRequestIds[requestId] !== true) {
+                            throw new Error('تعذر تثبيت أثر السلفة في سجل السائق.');
+                        }
+                    }
+                    return requestRef.update({ status: 'approved', approvedAt: Date.now() })
+                        .then(() => alert(`تمت الموافقة على سلفة ${req.driver} بقيمة ${amount.toLocaleString()} ل.س.`));
+                });
+            }).catch(err => alert('تعذرت الموافقة. يمكنك إعادة المحاولة بأمان؛ لن تُضاف السلفة مرتين: ' + err.message));
         };
 
         window.rejectAdvance = function(weekId, requestId) {
@@ -569,7 +667,9 @@
             document.getElementById('attDriverName').value = driverName;
             document.getElementById('attDriverNameDisplay').value = driverName;
             const weekDays = getWeekDaysList(window.currentActiveWeek);
-            document.getElementById('attDateSelect').innerHTML = weekDays.map(d => `<option value="${d.dateKey}">${d.name} (${d.displayDate})</option>`).join('');
+            const dateSelect = document.getElementById('attDateSelect');
+            dateSelect.replaceChildren();
+            weekDays.forEach(d => dateSelect.appendChild(new Option(`${d.name} (${d.displayDate})`, d.dateKey)));
             openModal('attendanceModal');
         };
 
@@ -597,7 +697,7 @@
         };
 
         window.sendAdminReply = function(driverName) {
-            const inputEl = document.getElementById(`reply_input_${driverName.replace(/\s+/g, '_')}`);
+            const inputEl = document.getElementById(`reply_input_${encodeURIComponent(String(driverName))}`);
             if (!inputEl) return;
             const text = inputEl.value.trim();
             if (!text) return;
@@ -621,9 +721,13 @@
             document.getElementById('transDriverDisplay').value = `${driverName} (${shiftType === 'day' ? 'نهاري' : 'ليلي'})`;
 
             const targetSelect = document.getElementById('transTargetCarSelect');
-            targetSelect.innerHTML = window.appState.cars.map(c => `
-                <option value="${c.id}">سيارة: ${c.plate} - ${c.model}</option>
-            `).join('');
+            targetSelect.replaceChildren();
+            window.appState.cars.forEach(c => {
+                const option = document.createElement('option');
+                option.value = String(c.id);
+                option.textContent = `سيارة: ${c.plate} - ${c.model}`;
+                targetSelect.appendChild(option);
+            });
 
             openModal('transferDriverModal');
         };
@@ -636,8 +740,8 @@
             const targetCarId = Number(document.getElementById('transTargetCarSelect').value);
             const targetShiftType = document.getElementById('transTargetShiftSelect').value;
 
-            const oldCar = window.appState.cars.find(c => c.id === oldCarId);
-            const targetCar = window.appState.cars.find(c => c.id === targetCarId);
+            const oldCar = window.appState.cars.find(c => String(c.id) === String(oldCarId));
+            const targetCar = window.appState.cars.find(c => String(c.id) === String(targetCarId));
 
             if (!oldCar || !targetCar) {
                 alert("خطأ في تحديد السيارات.");
@@ -715,13 +819,13 @@
                     <div class="fin-row" style="margin-bottom: 8px;">
                         <div class="fin-row-top">
                             <div>
-                                <span class="d-name">${shift.driver}</span>
+                                <span class="d-name">${escapeHtml(shift.driver)}</span>
                                 <span class="status-pill status-on">🟢 في وردية نشطة</span>
-                                <span class="d-car">(سيارة: ${shift.car})</span>
+                                <span class="d-car">(سيارة: ${escapeHtml(shift.car)})</span>
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
                                 <span class="live-timer-badge">⏱️ ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}</span>
-                                <button class="btn-end-shift" onclick="adminEndShift(${carId}, '${shift.driver}')">🛑 إنهاء الوردية</button>
+                                <button class="btn-end-shift" onclick="adminEndShift(${inlineArg(String(carId))}, ${inlineArg(shift.driver)})">🛑 إنهاء الوردية</button>
                             </div>
                         </div>
                         <p style="font-size: 10px; color: var(--text-sub);">وقت البدء: ${formatDateTime(startTime)}</p>
@@ -746,7 +850,7 @@
                 Object.keys(window.appState.activeShifts).forEach(carId => {
                     let val = window.appState.activeShifts[carId];
                     let drv = (typeof val === 'object' && val !== null) ? val.driver : val;
-                    if (drv === d.name) {
+                    if (drv === d.name && String(carId) === String(d.carId) && (!val || typeof val !== 'object' || !val.shift || val.shift === d.shift)) {
                         isOnDuty = true;
                         activeCarId = carId;
                     }
@@ -773,19 +877,19 @@
 
                 const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
                 const liveSalary = totalHours * driverRate;
-                const rewards = rec.rewards || 0;
+                const rewards = Number(rec.rewards) || 0;
                 const netDue = liveSalary + rewards - (rec.advances || 0);
 
-                const timerEl = document.getElementById(`timer_${d.name.replace(/\s+/g, '_')}`);
-                const statusEl = document.getElementById(`status_${d.name.replace(/\s+/g, '_')}`);
-                const endShiftBtnEl = document.getElementById(`end_btn_${d.name.replace(/\s+/g, '_')}`);
-                const salaryEl = document.getElementById(`salary_${d.name.replace(/\s+/g, '_')}`);
-                const rewardsEl = document.getElementById(`rewards_${d.name.replace(/\s+/g, '_')}`);
-                const netEl = document.getElementById(`net_${d.name.replace(/\s+/g, '_')}`);
-                const todayHoursEl = document.getElementById(`today_hours_${d.name.replace(/\s+/g, '_')}`);
-                const weekHoursEl = document.getElementById(`week_hours_${d.name.replace(/\s+/g, '_')}`);
-                const startTimeEl = document.getElementById(`start_time_${d.name.replace(/\s+/g, '_')}`);
-                const endTimeEl = document.getElementById(`end_time_${d.name.replace(/\s+/g, '_')}`);
+                const timerEl = document.getElementById(`timer_${encodeURIComponent(String(d.name))}`);
+                const statusEl = document.getElementById(`status_${encodeURIComponent(String(d.name))}`);
+                const endShiftBtnEl = document.getElementById(`end_btn_${encodeURIComponent(String(d.name))}`);
+                const salaryEl = document.getElementById(`salary_${encodeURIComponent(String(d.name))}`);
+                const rewardsEl = document.getElementById(`rewards_${encodeURIComponent(String(d.name))}`);
+                const netEl = document.getElementById(`net_${encodeURIComponent(String(d.name))}`);
+                const todayHoursEl = document.getElementById(`today_hours_${encodeURIComponent(String(d.name))}`);
+                const weekHoursEl = document.getElementById(`week_hours_${encodeURIComponent(String(d.name))}`);
+                const startTimeEl = document.getElementById(`start_time_${encodeURIComponent(String(d.name))}`);
+                const endTimeEl = document.getElementById(`end_time_${encodeURIComponent(String(d.name))}`);
 
                 if (timerEl) timerEl.innerText = `⏱️ ${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
                 if (statusEl) {
@@ -795,7 +899,7 @@
                 if (endShiftBtnEl) {
                     if (isOnDuty && activeCarId) {
                         endShiftBtnEl.style.display = 'inline-flex';
-                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${activeCarId}, '${d.name}')`);
+                        endShiftBtnEl.setAttribute('onclick', `adminEndShift(${inlineArg(String(activeCarId))}, ${inlineArg(d.name)})`);
                     } else {
                         endShiftBtnEl.style.display = 'none';
                     }
@@ -874,33 +978,33 @@
                 <div class="card" style="margin-bottom:0;">
                     <div class="card-header">
                         <div>
-                            <span style="background:rgba(245,158,11,0.2); color:var(--accent-amber); font-weight:800; font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid rgba(245,158,11,0.3);">${car.plate}</span>
-                            <h3 style="font-size:13px; font-weight:800; margin-top:4px;">${car.model}</h3>
+                            <span style="background:rgba(245,158,11,0.2); color:var(--accent-amber); font-weight:800; font-size:10px; padding:2px 6px; border-radius:6px; border:1px solid rgba(245,158,11,0.3);">${escapeHtml(car.plate)}</span>
+                            <h3 style="font-size:13px; font-weight:800; margin-top:4px;">${escapeHtml(car.model)}</h3>
                         </div>
                         <div>
-                            <button onclick="editCar(${car.id})" style="background:transparent; border:none; color:var(--text-sub); font-size:12px; cursor:pointer; margin-left:6px;">✏️</button>
-                            <button onclick="askDeleteCar(${car.id})" style="background:transparent; border:none; color:var(--accent-red); font-size:12px; cursor:pointer;">🗑️</button>
+                            <button onclick="editCar(${inlineArg(car.id)})" style="background:transparent; border:none; color:var(--text-sub); font-size:12px; cursor:pointer; margin-left:6px;">✏️</button>
+                            <button onclick="askDeleteCar(${inlineArg(car.id)})" style="background:transparent; border:none; color:var(--accent-red); font-size:12px; cursor:pointer;">🗑️</button>
                         </div>
                     </div>
                     <div class="drivers-grid">
                         <div class="driver-subcard">
                             <div>
                                 <p class="label-day">☀️ نهاري</p>
-                                ${car.dayDriver?.name ? `<p class="name">${car.dayDriver.name}</p><p class="phone">${car.dayDriver.phone || '-'}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
+                                ${car.dayDriver?.name ? `<p class="name">${escapeHtml(car.dayDriver.name)}</p><p class="phone">${escapeHtml(car.dayDriver.phone || '-')}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
                             </div>
                             <div class="driver-actions-group">
-                                ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${car.id}, '${car.dayDriver.name}', 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
-                                ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'day')" class="btn-del-sm">✕</button>` : ''}
+                                ${car.dayDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.dayDriver.name)}, 'day')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.dayDriver?.name ? `<button onclick="askRemoveDriver(${inlineArg(car.id)}, 'day')" class="btn-del-sm">✕</button>` : ''}
                             </div>
                         </div>
                         <div class="driver-subcard">
                             <div>
                                 <p class="label-night">🌙 ليلي</p>
-                                ${car.nightDriver?.name ? `<p class="name">${car.nightDriver.name}</p><p class="phone">${car.nightDriver.phone || '-'}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
+                                ${car.nightDriver?.name ? `<p class="name">${escapeHtml(car.nightDriver.name)}</p><p class="phone">${escapeHtml(car.nightDriver.phone || '-')}</p>` : `<p class="name" style="color:var(--text-sub);">لا يوجد</p>`}
                             </div>
                             <div class="driver-actions-group">
-                                ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${car.id}, '${car.nightDriver.name}', 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
-                                ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${car.id}, 'night')" class="btn-del-sm">✕</button>` : ''}
+                                ${car.nightDriver?.name ? `<button onclick="openTransferDriverModal(${inlineArg(car.id)}, ${inlineArg(car.nightDriver.name)}, 'night')" class="btn-transfer-sm">🔄 نقل</button>` : ''}
+                                ${car.nightDriver?.name ? `<button onclick="askRemoveDriver(${inlineArg(car.id)}, 'night')" class="btn-del-sm">✕</button>` : ''}
                             </div>
                         </div>
                     </div>
@@ -921,7 +1025,7 @@
         }
 
         window.editCar = function(carId) {
-            const car = window.appState.cars.find(c => c.id === carId);
+            const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('carEditId').value = car.id;
             document.getElementById('carPlate').value = car.plate;
@@ -942,34 +1046,51 @@
             const dayDriver = { name: document.getElementById('dayDriverName').value.trim(), phone: document.getElementById('dayDriverPhone').value.trim() };
             const nightDriver = { name: document.getElementById('nightDriverName').value.trim(), phone: document.getElementById('nightDriverPhone').value.trim() };
 
-            if (editId) {
-                const car = window.appState.cars.find(c => c.id == editId);
-                if (car) { car.plate = plate; car.model = model; car.dayDriver = dayDriver; car.nightDriver = nightDriver; }
+            if (!plate || !model) return alert('أدخل رقم اللوحة وطراز السيارة.');
+            const invalidDriverName = [dayDriver.name, nightDriver.name].some(name => /[.#$\/\[\]]/.test(name));
+            if (invalidDriverName) return alert('اسم السائق يحتوي على رموز غير مسموح بها في قاعدة البيانات (. # $ / [ ]).');
+            const assignedNames = [dayDriver.name, nightDriver.name].filter(Boolean);
+            if (new Set(assignedNames).size !== assignedNames.length) return alert('لا يمكن تسجيل الاسم نفسه كسائق نهاري وليلي في السيارة ذاتها.');
+            const duplicatePlate = window.appState.cars.some(c => String(c.id) !== String(editId || '') && String(c.plate || '').trim().toLowerCase() === plate.toLowerCase());
+            if (duplicatePlate) return alert('رقم اللوحة مستخدم في سجل سيارة آخر. يجب أن تكون اللوحة فريدة.');
+            const duplicateDriver = getAllDrivers().some(d => String(d.carId) !== String(editId || '') && assignedNames.includes(d.name));
+            if (duplicateDriver) return alert('اسم السائق مسجل مسبقاً في سيارة أخرى. يجب أن يكون لكل سائق اسم مميز لتجنب تداخل السجلات.');
+            if (editId) {            if (window.appState.activeShifts[String(editId)]) return alert('لا يمكن تعديل بيانات السيارة أو سائقيها أثناء وجود وردية نشطة. أنهِ الوردية أولاً.');
+            
+                const car = window.appState.cars.find(c => String(c.id) === String(editId));
+                if (!car) return alert('تعذر العثور على سجل السيارة المطلوب تعديله.');
+                car.plate = plate; car.model = model; car.dayDriver = dayDriver; car.nightDriver = nightDriver;
             } else {
                 window.appState.cars.push({ id: Date.now(), plate, model, dayDriver, nightDriver });
             }
-            closeModal('carModal');
-            db.ref('cars').set(window.appState.cars);
+            db.ref('cars').set(window.appState.cars).then(() => {
+                closeModal('carModal');
+                alert('تم حفظ بيانات السيارة والسائقين بنجاح.');
+            }).catch(err => alert('تعذر حفظ بيانات السيارة: ' + err.message));
         }
 
         window.askDeleteCar = function(carId) {
-            const car = window.appState.cars.find(c => c.id === carId);
+            if (window.appState.activeShifts[String(carId)]) return alert('لا يمكن حذف سيارة لديها وردية نشطة. أنهِ الوردية أولاً.');
+            const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('deleteModalTitle').innerText = "حذف السيارة";
             document.getElementById('deleteModalDesc').innerText = `هل تريد حذف (${car.plate})؟`;
             pendingDeleteAction = () => {
-                window.appState.cars = window.appState.cars.filter(c => c.id !== carId);
+                if (window.appState.activeShifts[String(carId)]) return alert('بدأت وردية جديدة لهذه السيارة. ألغيت عملية الحذف.');
+                window.appState.cars = window.appState.cars.filter(c => String(c.id) !== String(carId));
                 db.ref('cars').set(window.appState.cars);
             };
             openModal('deleteModal');
         }
 
         window.askRemoveDriver = function(carId, shiftType) {
-            const car = window.appState.cars.find(c => c.id === carId);
+            if (window.appState.activeShifts[String(carId)]) return alert('لا يمكن إزالة سائق من سيارة لديها وردية نشطة. أنهِ الوردية أولاً.');
+            const car = window.appState.cars.find(c => String(c.id) === String(carId));
             if (!car) return;
             document.getElementById('deleteModalTitle').innerText = "إزالة السائق";
             document.getElementById('deleteModalDesc').innerText = `إزالة سائق الشفت للسيارة (${car.plate})؟`;
             pendingDeleteAction = () => {
+                if (window.appState.activeShifts[String(carId)]) return alert('بدأت وردية جديدة لهذه السيارة. ألغيت عملية الإزالة.');
                 if (shiftType === 'day') car.dayDriver = { name: "", phone: "" };
                 if (shiftType === 'night') car.nightDriver = { name: "", phone: "" };
                 db.ref('cars').set(window.appState.cars);
@@ -990,9 +1111,13 @@
             const select = document.getElementById('adminDriverSelect');
             if (!select) return;
             const drivers = getAllDrivers();
-            select.innerHTML = `<option value="">اختر السائق...</option>` + drivers.map(d => `
-                <option value="${d.name}">${d.name} (${d.car} - ${d.shift})</option>
-            `).join('');
+            select.replaceChildren(new Option('اختر السائق...', ''));
+            drivers.forEach(d => {
+                const option = document.createElement('option');
+                option.value = String(d.name);
+                option.textContent = `${d.name} (${d.car} - ${d.shift})`;
+                select.appendChild(option);
+            });
         }
 
         window.adminAddTransaction = function(e) {
@@ -1002,6 +1127,8 @@
             const amount = Number(document.getElementById('adminAmount').value) || 0;
             if (!driverName || !Number.isFinite(amount) || amount <= 0) return alert('تحقق من اختيار السائق والقيمة.');
             const weekId = getSaturdayWeekId();
+            if (!getAllDrivers().some(driver => driver.name === driverName)) return alert('السائق المحدد غير موجود في الأسطول الحالي.');
+            if (!['hours', 'deduct_hours', 'reward', 'advance', 'custom_rate'].includes(actionType)) return alert('نوع العملية غير صالح.');
             db.ref(`weeklyRecords/${weekId}/${driverName}`).transaction(rec => {
                 rec = rec || { hours: 0, advances: 0, rewards: 0, days: {} };
                 if (actionType === 'hours') { rec.hours = (Number(rec.hours) || 0) + amount; rec.todayHours = (Number(rec.todayHours) || 0) + amount; }
@@ -1025,9 +1152,12 @@
             if (!weeks.includes(thisWeek)) weeks.push(thisWeek);
             weeks.sort().reverse();
 
-            selector.innerHTML = weeks.map(w => `
-                <option value="${w}" ${w === window.currentActiveWeek ? 'selected' : ''}>أسبوع (من سبت): ${w.replace('-W_Sat_', ' ')} ${w === thisWeek ? '(الحالي)' : ''}</option>
-            `).join('');
+            selector.replaceChildren();
+            weeks.forEach(w => {
+                const option = new Option('أسبوع (من سبت): ' + String(w).replace('-W_Sat_', ' ') + (w === thisWeek ? ' (الحالي)' : ''), String(w));
+                option.selected = w === window.currentActiveWeek;
+                selector.appendChild(option);
+            });
         }
 
         window.changeWeekView = function() {
@@ -1063,19 +1193,20 @@
                 const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, odoStart: 0, odoEnd: 0, odoStartImg: '', odoEndImg: '', paid: false, todayHours: 0, days: {} };
                 const driverRate = (rec.customHourlyRate !== undefined && rec.customHourlyRate !== null) ? Number(rec.customHourlyRate) : GLOBAL_HOURLY_RATE;
                 const initialSalary = (rec.hours || 0) * driverRate;
-                const rewards = rec.rewards || 0;
+                const rewards = Number(rec.rewards) || 0;
                 const netDue = initialSalary + rewards - (rec.advances || 0);
                 
-                const timerId = `timer_${d.name.replace(/\s+/g, '_')}`;
-                const statusId = `status_${d.name.replace(/\s+/g, '_')}`;
-                const endBtnId = `end_btn_${d.name.replace(/\s+/g, '_')}`;
-                const salaryId = `salary_${d.name.replace(/\s+/g, '_')}`;
-                const netId = `net_${d.name.replace(/\s+/g, '_')}`;
-                const todayHoursId = `today_hours_${d.name.replace(/\s+/g, '_')}`;
-                const weekHoursId = `week_hours_${d.name.replace(/\s+/g, '_')}`;
-                const startTimeId = `start_time_${d.name.replace(/\s+/g, '_')}`;
-                const endTimeId = `end_time_${d.name.replace(/\s+/g, '_')}`;
-                const dropdownId = `dropdown_days_${d.name.replace(/\s+/g, '_')}`;
+                const safeDriverId = encodeURIComponent(String(d.name));
+                const timerId = `timer_${safeDriverId}`;
+                const statusId = `status_${safeDriverId}`;
+                const endBtnId = `end_btn_${safeDriverId}`;
+                const salaryId = `salary_${safeDriverId}`;
+                const netId = `net_${safeDriverId}`;
+                const todayHoursId = `today_hours_${safeDriverId}`;
+                const weekHoursId = `week_hours_${safeDriverId}`;
+                const startTimeId = `start_time_${safeDriverId}`;
+                const endTimeId = `end_time_${safeDriverId}`;
+                const dropdownId = `dropdown_days_${safeDriverId}`;
 
                 let daysRowsHtml = weekDays.map(day => {
                     const dayData = rec.days && rec.days[day.dateKey];
@@ -1102,8 +1233,8 @@
                                 <div>بدء: <b>${startT}</b></div>
                                 <div>انتهاء: <b>${endT}</b></div>
                                 <div>ساعات اليوم: <b style="color:var(--accent-amber);">${dayHours}</b></div>
-                                <div>عداد البداية: ${dayData?.odoStartImg || rec.odoStartImg ? `<button onclick="showImage('${dayData?.odoStartImg || rec.odoStartImg}', 'صورة عداد البداية (${day.name})', '${formatDateTime(dayData?.startTime || rec.odoStartTimestamp)}') " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
-                                <div>عداد النهاية: ${dayData?.odoEndImg || rec.odoEndImg ? `<button onclick="showImage('${dayData?.odoEndImg || rec.odoEndImg}', 'صورة عداد النهاية (${day.name})', '${formatDateTime(dayData?.endTime || rec.odoEndTimestamp)}') " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد البداية: ${dayData?.odoStartImg || rec.odoStartImg ? `<button onclick="showImage(${inlineArg(dayData?.odoStartImg || rec.odoStartImg)}, ${inlineArg('صورة عداد البداية (' + day.name + ')')}, ${inlineArg(formatDateTime(dayData?.startTime || rec.odoStartTimestamp))}) " style="background:var(--accent-amber); color:#000; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
+                                <div>عداد النهاية: ${dayData?.odoEndImg || rec.odoEndImg ? `<button onclick="showImage(${inlineArg(dayData?.odoEndImg || rec.odoEndImg)}, ${inlineArg('صورة عداد النهاية (' + day.name + ')')}, ${inlineArg(formatDateTime(dayData?.endTime || rec.odoEndTimestamp))}) " style="background:var(--accent-indigo); color:#fff; border:none; padding:2px 6px; border-radius:4px; font-size:8px; font-weight:bold; cursor:pointer;">📷 عرض</button>` : '<span style="color:var(--text-sub)">لا توجد</span>'}</div>
                             </div>
                         </div>
                     `;
@@ -1116,9 +1247,9 @@
                     <div class="fin-row">
                         <div class="fin-row-top">
                             <div>
-                                <span class="d-name">${d.name}</span>
+                                <span class="d-name">${escapeHtml(d.name)}</span>
                                 <span id="${statusId}" class="status-pill status-off">⚪ في استراحة</span>
-                                <span class="d-car">(${d.car} - ${d.shift})</span>
+                                <span class="d-car">(${escapeHtml(d.car)} - ${escapeHtml(d.shift)})</span>
                                 ${rec.customHourlyRate ? `<span style="font-size:9px; color:var(--accent-amber); background:rgba(245,158,11,0.2); padding:2px 6px; border-radius:4px; margin-right:4px;">أجر خصيص: ${Number(rec.customHourlyRate).toLocaleString()} ل.س</span>` : ''}
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
@@ -1133,9 +1264,9 @@
                         </div>
 
                         <div class="weekly-sched-container">
-                            <button onclick="toggleDropdown('${dropdownId}')" class="dropdown-toggle-btn">
+                            <button onclick="toggleDropdown(${inlineArg(dropdownId)})" class="dropdown-toggle-btn">
                                 <span>📅 جدول الدوام والحضور الأسبوعي (اضغط للعرض/الإخفاء)</span>
-                                <span style="font-size:10px; color:var(--accent-indigo);" onclick="event.stopPropagation(); openAttendanceModal('${d.name}')">✏️ تعديل الحضور</span>
+                                <span style="font-size:10px; color:var(--accent-indigo);" onclick="event.stopPropagation(); openAttendanceModal(${inlineArg(d.name)})">✏️ تعديل الحضور</span>
                             </button>
                             <div id="${dropdownId}" class="dropdown-content-box">
                                 ${daysRowsHtml}
@@ -1146,8 +1277,8 @@
                             <div class="sched-title" style="color:var(--accent-indigo);">💬 ملاحظات السائق والدردشة</div>
                             <div class="admin-notes-box">${notesHtml}</div>
                             <div style="display:flex; gap:6px; margin-top:4px;">
-                                <input type="text" id="reply_input_${d.name.replace(/\s+/g, '_')}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
-                                <button onclick="sendAdminReply('${d.name}')" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
+                                <input type="text" id="reply_input_${safeDriverId}" placeholder="اكتب رداً للسائق..." class="form-control" style="margin-bottom:0;">
+                                <button onclick="sendAdminReply(${inlineArg(d.name)})" class="btn-submit" style="width:auto; margin:0; padding:6px 12px; background:var(--accent-indigo); color:#fff;">إرسال</button>
                             </div>
                         </div>
 
@@ -1155,16 +1286,16 @@
                             <div class="fin-box"><p class="lbl">ساعات اليوم</p><p id="${todayHoursId}" class="val val-indigo">0 س</p></div>
                             <div class="fin-box"><p class="lbl">ساعات الأسبوع</p><p id="${weekHoursId}" class="val val-amber">0 س</p></div>
                             <div class="fin-box"><p class="lbl">الأجر</p><p id="${salaryId}" class="val val-green">${Math.round(initialSalary).toLocaleString()} ل.س</p></div>
-                            <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(rec.advances || 0).toLocaleString()} ل.س</p></div>
+                            <div class="fin-box"><p class="lbl">السلف</p><p class="val val-red">${(Number(rec.advances) || 0).toLocaleString()} ل.س</p></div>
                             <div class="fin-box"><p class="lbl">الصافي</p><p id="${netId}" class="val val-amber">${Math.round(netDue).toLocaleString()} ل.س</p></div>
                         </div>
                         <div class="pay-salary-box">
                             <div>
                                 <span style="font-size:10px; font-weight:700; color:${rec.paid ? 'var(--accent-green)' : 'var(--text-sub)'};">
-                                    ${rec.paid ? '✅ تم إرسال الراتب (' + (rec.paidAmount || Math.round(netDue)).toLocaleString() + ' ل.س)' : '⏳ الراتب بانتظار التقبيض'}
+                                    ${rec.paid ? '✅ تم إرسال الراتب (' + (Number(rec.paidAmount) || Math.round(netDue)).toLocaleString() + ' ل.س)' : '⏳ الراتب بانتظار التقبيض'}
                                 </span>
                             </div>
-                            <button onclick="paySalary('${d.name}', ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">
+                            <button onclick="paySalary(${inlineArg(d.name)}, ${Math.round(netDue)})" class="btn-pay ${rec.paid ? 'paid' : ''}">
                                 ${rec.paid ? 'تم التقبيض' : '💵 تقبيض الراتب'}
                             </button>
                         </div>
