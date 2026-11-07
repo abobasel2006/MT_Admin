@@ -1,35 +1,9 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#101827">
-  <title>MT TAXI 2.0 — لوحة الإدارة</title>
-  <link rel="stylesheet" href="./styles-v2.css">
-</head>
-<body>
-  <main class="shell">
-    <header><span class="brand">MT TAXI <b>2.0</b></span><span class="tag">لوحة الإدارة</span></header>
-    <section class="panel">
-      <p class="eyebrow">النسخة الجديدة</p>
-      <h1>إدارة الأسطول</h1>
-      <p>يجري تجهيز لوحة الإدارة. لم يتم ربطها ببيانات الإنتاج القديمة.</p>
-      <div id="connection" class="status" role="status">جارٍ تهيئة الاتصال...</div>
-    </section>
-    <footer>نظام مستقل — MT TAXI 2.0</footer>
-  </main>
-  <script type="module">
-    import { db, ref, get } from "./src/firebase.js";
-    const status = document.querySelector("#connection");
-    try {
-      await get(ref(db, ".info/connected"));
-      status.textContent = "تم تحميل إعدادات Firebase. اختبار القراءة ينتظر إعداد قواعد الوصول.";
-      status.dataset.state = "ready";
-    } catch (error) {
-      status.textContent = "الاتصال غير متاح حالياً؛ قاعدة البيانات مقفلة أثناء البناء.";
-      status.dataset.state = "locked";
-      console.error("Firebase initialization/read check:", error);
-    }
-  </script>
-</body>
-</html>
+<html lang="ar" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#101827"><title>MT TAXI 2.0 — لوحة الإدارة</title><link rel="stylesheet" href="./styles-v2.css"></head>
+<body><main class="shell"><header><span class="brand">MT TAXI <b>2.0</b></span><span class="tag">لوحة الإدارة الجديدة</span></header>
+<section class="panel intro"><p class="eyebrow">إدارة الأسطول</p><h1>السائقون والسيارات</h1><p>إدارة مستقلة بمعرّفات ثابتة، وتعيين ورديات النهار والليل. لا اتصال ببيانات المشروع القديم.</p><div id="connection" class="status" role="status">جارٍ الاتصال بقاعدة MT TAXI 2.0...</div><div id="notice" class="notice" role="status" aria-live="polite">جاهز.</div></section>
+<section class="stats"><div class="stat"><span>السائقون</span><strong id="driverCount">0</strong></div><div class="stat"><span>السيارات</span><strong id="carCount">0</strong></div></section>
+<section class="forms-grid"><form id="driverForm" class="panel form-panel"><h2>إضافة سائق</h2><label>اسم السائق<input name="name" required maxlength="80" placeholder="الاسم الكامل"></label><label>رقم الهاتف<input name="phone" maxlength="30" inputmode="tel" placeholder="اختياري"></label><label>ملاحظات<input name="notes" maxlength="180" placeholder="اختياري"></label><button class="primary" type="submit">إنشاء السائق</button></form>
+<form id="carForm" class="panel form-panel"><h2>إضافة سيارة</h2><label>رقم اللوحة<input name="plate" required maxlength="40" placeholder="رقم اللوحة"></label><label>الموديل<input name="model" maxlength="60" placeholder="نوع السيارة / الموديل"></label><button class="primary" type="submit">إنشاء السيارة</button></form></section>
+<section class="panel list-panel"><div class="section-head"><h2>السيارات وتعيين الورديات</h2><button id="refreshBtn" class="secondary" type="button">تحديث الصفحة</button></div><p class="hint">اختر سائقاً لكل وردية. لا يمكن تعيين السائق نفسه في أكثر من خانة.</p><div id="carsList" class="items"></div></section>
+<section class="panel list-panel"><h2>إدارة السائقين</h2><p class="hint">يمكن تعديل البيانات أو تعطيل السائق. لا يوجد حذف نهائي للسجلات.</p><div id="driversList" class="items"></div></section><footer>MT TAXI 2.0 — بيئة مستقلة قيد التطوير</footer></main><script type="module" src="./admin-v2.js"></script></body></html>
