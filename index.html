@@ -632,7 +632,10 @@
                 const persistedFallback = Number(
                     weekRecord.imgTimestamp ||
                     weekRecord.odoStartTimestamp ||
-                    weekRecord.lastShiftStart ||
+                    (Number(weekRecord.lastShiftStart) > 0 &&
+                     (!Number(weekRecord.lastShiftEnd) || Number(weekRecord.lastShiftEnd) < Number(weekRecord.lastShiftStart))
+                        ? Number(weekRecord.lastShiftStart)
+                        : 0) ||
                     openDayStarts[0] ||
                     0
                 );
