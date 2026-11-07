@@ -64,16 +64,12 @@ export async function endShift({ shiftId, driverId, endOdometer = null }) {
     throw new Error("قراءة عداد النهاية غير صحيحة.");
   }
 
-  let finalized = null;
   const result = await runTransaction(stateRef, current => {
     if (!current?.history?.[shiftId]) return;
     const state = current;
     const shift = state.history[shiftId];
     if (shift.driverId !== driverId.trim()) return;
-    if (shift.status === "ended") {
-      finalized = shift;
-      return state;
-    }
+    if (shift.status === "ended") return state;
     if (shift.status !== "active") return;
 
     const endedAt = Date.now();
@@ -93,11 +89,11 @@ export async function endShift({ shiftId, driverId, endOdometer = null }) {
     const carKey = `${shift.carId}__${shift.shiftType}`;
     if (state.activeByCar?.[carKey] === shiftId) delete state.activeByCar[carKey];
     if (state.activeByDriver?.[shift.driverId] === shiftId) delete state.activeByDriver[shift.driverId];
-    finalized = updated;
     return state;
   });
 
-  if (!result.committed || !finalized) {
+  const finalized = result.snapshot.val()?.history?.[shiftId];
+  if (!result.committed || !finalized || finalized.driverId !== driverId.trim() || finalized.status !== "ended") {
     throw new Error("تعذر إنهاء الوردية: تحقق من معرف الوردية والسائق وحالة العداد.");
   }
   return finalized;
