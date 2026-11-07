@@ -603,41 +603,107 @@
             return shiftId;
         }
 
-        window.adminEndShift = async function(carId, driverName) {
-            if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
-            carId = String(carId);
-            driverName = String(driverName || '').trim();
-            const cachedShift = (window.appState.activeShifts || {})[carId] || {};
-            const startTime = getActiveShiftStartTime(cachedShift) || Number(adminShiftStartTimes[driverName] || 0);
-            if (!driverName || !startTime) return alert('تعذر تحديد السائق أو وقت بدء الوردية. لم يتم إجراء أي تغيير.');
+        const pendingAdminShiftEnds = new Set();
 
-            const requestedEndTime = Date.now();
-            const finalizationToken = `${Date.now()}-${Math.random()}`;
+        window.adminEndShift = async function(carId, driverName) {
+            carId = String(carId ?? '').trim();
+            driverName = String(driverName ?? '').trim();
+            if (!carId || !driverName) return alert('تعذر تحديد السيارة أو السائق. لم يتم إجراء أي تغيير.');
+            if (pendingAdminShiftEnds.has(carId)) return;
+            if (!confirm(`هل أنت متأكد من إنهاء الوردية الحالية للسائق (${driverName})؟`)) return;
+
+            pendingAdminShiftEnds.add(carId);
             const shiftRef = db.ref(`activeShifts/${carId}`);
             try {
+                // Always read the live Firebase record first. UI/cache timers may be stale
+                // or may contain a fallback timestamp for legacy records.
+                const liveSnapshot = await shiftRef.once('value');
+                const liveShift = liveSnapshot.val();
+                if (!liveShift || getActiveShiftDriverName(liveShift) !== driverName) {
+                    throw new Error('لم تعد هناك وردية نشطة مطابقة لهذا السائق. حدّث لوحة الإدارة.');
+                }
+
+                const liveStartTime = getActiveShiftStartTime(liveShift);
+                const weekRecord = ((window.appState.weeklyRecords || {})[window.currentActiveWeek] || {})[driverName] || {};
+                const openDayStarts = Object.values(weekRecord.days || {})
+                    .filter(day => day && Number(day.startTime) > 0 && !Number(day.endTime))
+                    .map(day => Number(day.startTime))
+                    .sort((a, b) => b - a);
+                const persistedFallback = Number(
+                    weekRecord.imgTimestamp ||
+                    weekRecord.odoStartTimestamp ||
+                    (Number(weekRecord.lastShiftStart) > 0 &&
+                     (!Number(weekRecord.lastShiftEnd) || Number(weekRecord.lastShiftEnd) < Number(weekRecord.lastShiftStart))
+                        ? Number(weekRecord.lastShiftStart)
+                        : 0) ||
+                    openDayStarts[0] ||
+                    0
+                );
+                const startTime = liveStartTime || persistedFallback;
+                if (!Number.isFinite(startTime) || startTime <= 0 || startTime > Date.now()) {
+                    throw new Error('سجل الوردية لا يحتوي وقت بدء صالحاً. لم يتم حذف الوردية أو تغيير سجل السائق.');
+                }
+
+                const requestedEndTime = Date.now();
+                const finalizationToken = `${requestedEndTime}-${Math.random().toString(36).slice(2)}`;
                 const result = await shiftRef.transaction(current => {
-                    if (!current || getActiveShiftDriverName(current) !== driverName || getActiveShiftStartTime(current) !== startTime) return;
+                    if (!current || getActiveShiftDriverName(current) !== driverName) return;
+                    const currentStartTime = getActiveShiftStartTime(current);
+                    // If a legacy active record lacks a timestamp, restore the timestamp
+                    // selected from the live UI context; never overwrite a different start.
+                    if (currentStartTime && currentStartTime !== startTime) return;
+
                     const existingStatus = String(current.status || '').toLowerCase();
                     if (existingStatus === 'finalizing') {
-                        const stale = Date.now() - Number(current.finalizingAt || 0) > 120000;
+                        const stale = requestedEndTime - Number(current.finalizingAt || 0) > 120000;
                         if (!stale) return;
-                        return { ...current, driver: driverName, timestamp: startTime, finalizingAt: Date.now(), finalizationToken };
+                        return {
+                            ...current,
+                            driver: driverName,
+                            timestamp: startTime,
+                            finalizingAt: Date.now(),
+                            finalizationToken
+                        };
                     }
-                    return { ...current, driver: driverName, timestamp: startTime, status: 'finalizing', finalizedBy: 'admin', finalizingAt: Date.now(), finalizationToken, endTime: requestedEndTime };
+
+                    return {
+                        ...current,
+                        driver: driverName,
+                        timestamp: startTime,
+                        status: 'finalizing',
+                        finalizedBy: 'admin',
+                        finalizingAt: Date.now(),
+                        finalizationToken,
+                        endTime: requestedEndTime
+                    };
                 });
+
                 const finalShift = result.snapshot && result.snapshot.val();
                 if (!result.committed || !finalShift || finalShift.finalizationToken !== finalizationToken) {
-                    return alert('لم يتم إنهاء الوردية: لم تعد هناك وردية مطابقة أو أن الإنهاء جارٍ من جهاز آخر. حدّث الصفحة وتحقق من حالة السائق.');
+                    throw new Error('الوردية قيد الإنهاء من جهاز آخر أو تغيرت بياناتها. انتظر دقيقتين ثم أعد المحاولة إذا بقيت عالقة.');
                 }
-                const finalEndTime = Number(finalShift.endTime);
-                if (!finalEndTime || finalEndTime <= startTime) throw new Error('وقت إنهاء الوردية غير صالح. بقيت الوردية محفوظة ولم تُحذف.');
-                await applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, finalShift, Boolean(finalShift.endOdoImg));
+
+                const finalEndTime = Number(finalShift.endTime) || requestedEndTime;
+                if (!Number.isFinite(finalEndTime) || finalEndTime <= startTime) {
+                    throw new Error('وقت إنهاء الوردية غير صالح. بقيت الوردية محفوظة ولم تُحذف.');
+                }
+
+                // Idempotent per-shift ledger: safe to retry if the connection drops mid-finalization.
+                await applyShiftHoursOnce(driverName, carId, startTime, finalEndTime, {
+                    ...finalShift,
+                    timestamp: startTime,
+                    endTime: finalEndTime
+                }, Boolean(finalShift.endOdoImg));
+
                 delete adminShiftStartTimes[driverName];
                 if (window.appState.activeShifts) delete window.appState.activeShifts[carId];
                 renderApp();
                 alert(`تم إنهاء وردية السائق (${driverName}) وتسجيل ساعاتها وتحرير السيارة بنجاح.`);
             } catch (err) {
-                alert('تعذر إنهاء الوردية: ' + (err && err.message ? err.message : err) + '\nلم يتم حذف بيانات السائق. تحقق من اتصال Firebase قبل إعادة المحاولة.');
+                console.error('Admin shift finalization failed:', err);
+                alert('تعذر إنهاء الوردية: ' + (err && err.message ? err.message : err) + '\nلم يتم حذف بيانات السائق. يمكنك إعادة المحاولة بعد التحقق من الاتصال.');
+            } finally {
+                pendingAdminShiftEnds.delete(carId);
             }
         };
 
