@@ -32,7 +32,7 @@ The initial shift functions use a Realtime Database root transaction so fleet as
 - `loginWithPin` checks the PIN and issues a Firebase custom token carrying the server-controlled driver role and driver ID.
 - Five consecutive failures for a driver trigger a 15-minute lockout. This per-driver throttle is not a substitute for App Check and broader abuse monitoring.
 - Before deployment, create the `MT_TAXI_PIN_PEPPER` secret in the Firebase/GCP project. Do not commit it or send it in chat.
-- The admin claim must be provisioned by a trusted server-side process. The current admin page has not yet been wired to this function, and the driver page has not yet been migrated to PIN login. Do not deploy or treat this as a complete login flow until those client changes, App Check, and emulator tests are complete.
+- The admin claim is now issued by the temporary admin PIN callable after server-side verification. The V2 admin page and driver PIN client have been wired to their callables, but they have not been deployed or tested end-to-end. Do not treat the flow as production-ready until App Check site-key configuration, Secret Manager setup, and emulator/staging tests are complete.
 
 
 ## Temporary management-page access model
