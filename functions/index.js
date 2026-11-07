@@ -24,7 +24,7 @@ function validOdometer(value) {
     (Number.isFinite(Number(value)) && Number(value) >= 0);
 }
 
-exports.startShift = onCall(async (request) => {
+exports.startShift = onCall({ region: "europe-west1" }, async (request) => {
   const claims = requireIdentity(request, "driver");
   const driverId = String(claims.driverId);
   const { carId, shiftType, startOdometer = null } = request.data || {};
