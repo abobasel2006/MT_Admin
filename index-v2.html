@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101827">
+  <title>MT TAXI 2.0 — لوحة الإدارة</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header><span class="brand">MT TAXI <b>2.0</b></span><span class="tag">لوحة الإدارة</span></header>
+    <section class="panel">
+      <p class="eyebrow">النسخة الجديدة</p>
+      <h1>إدارة الأسطول</h1>
+      <p>يجري تجهيز لوحة الإدارة. لم يتم ربطها ببيانات الإنتاج القديمة.</p>
+      <div id="connection" class="status" role="status">جارٍ تهيئة الاتصال...</div>
+    </section>
+    <footer>نظام مستقل — MT TAXI 2.0</footer>
+  </main>
+  <script type="module">
+    import { db, ref, get } from "./src/firebase.js";
+    const status = document.querySelector("#connection");
+    try {
+      await get(ref(db, ".info/connected"));
+      status.textContent = "تم تحميل إعدادات Firebase. اختبار القراءة ينتظر إعداد قواعد الوصول.";
+      status.dataset.state = "ready";
+    } catch (error) {
+      status.textContent = "الاتصال غير متاح حالياً؛ قاعدة البيانات مقفلة أثناء البناء.";
+      status.dataset.state = "locked";
+      console.error("Firebase initialization/read check:", error);
+    }
+  </script>
+</body>
+</html>
