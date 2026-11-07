@@ -467,25 +467,36 @@
         });
 
         let weeklyRecordsListenerRef = null;
+        let weeklyRecordsLoadToken = 0;
         function subscribeToSelectedWeek() {
             const weekId = window.currentActiveWeek;
+            const loadToken = ++weeklyRecordsLoadToken;
             if (weeklyRecordsListenerRef) weeklyRecordsListenerRef.off('value');
             if (!window.appState.weeklyRecords) window.appState.weeklyRecords = {};
+            // Show a cached copy immediately, then replace it with Firebase's first snapshot.
             window.appState.weeklyRecords[weekId] = readCachedWeek(weekId);
+            if (window.currentActiveWeek === weekId) renderWeeklyFinancialList();
+
             weeklyRecordsListenerRef = db.ref('weeklyRecords/' + weekId);
-            weeklyRecordsListenerRef.on('value', (snapshot) => {
+            const applyWeekSnapshot = (snapshot) => {
+                if (loadToken !== weeklyRecordsLoadToken || window.currentActiveWeek !== weekId) return;
                 const weekData = snapshot.val() || {};
                 window.appState.weeklyRecords[weekId] = weekData;
-                localStorage.setItem('mt_admin_week_' + weekId, JSON.stringify(weekData));
+                try { localStorage.setItem('mt_admin_week_' + weekId, JSON.stringify(weekData)); } catch (_) {}
                 if (!knownWeeklyRecordIds.includes(weekId)) {
                     knownWeeklyRecordIds.push(weekId);
                     knownWeeklyRecordIds = knownWeeklyRecordIds.slice(-300);
-                    localStorage.setItem('mt_admin_week_ids', JSON.stringify(knownWeeklyRecordIds));
+                    try { localStorage.setItem('mt_admin_week_ids', JSON.stringify(knownWeeklyRecordIds)); } catch (_) {}
                 }
-                if (window.currentActiveWeek !== weekId) return;
-                renderWeeklyFinancialList();
-                renderAdvanceNotifications();
-                renderWeekSelector();
+                // Re-render the complete dashboard after the initial Firebase read,
+                // not only after a later write/transaction changes the selected week.
+                renderApp();
+            };
+            weeklyRecordsListenerRef.on('value', applyWeekSnapshot, (error) => {
+                if (loadToken !== weeklyRecordsLoadToken || window.currentActiveWeek !== weekId) return;
+                console.error('Failed to load selected weekly records:', error);
+                const container = document.getElementById('driversFinancialList');
+                if (container) container.innerHTML = '<p style="text-align:center;color:var(--accent-red);padding:10px;">تعذر جلب بيانات الأسبوع من Firebase. تحقق من الاتصال والصلاحيات ثم أعد تحميل الصفحة.</p>';
             });
         }
         subscribeToSelectedWeek();
