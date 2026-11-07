@@ -1187,29 +1187,96 @@
             });
         }
 
-        window.adminAddTransaction = function(e) {
+        window.adminAddTransaction = async function(e) {
             e.preventDefault();
-            const driverName = document.getElementById('adminDriverSelect').value;
+            const form = e.currentTarget;
+            const submitButton = form && form.querySelector('button[type="submit"]');
+            const driverName = document.getElementById('adminDriverSelect').value.trim();
             const actionType = document.getElementById('adminActionType').value;
-            const amount = Number(document.getElementById('adminAmount').value) || 0;
-            if (!driverName || !Number.isFinite(amount) || amount <= 0) return alert('تحقق من اختيار السائق والقيمة.');
-            const weekId = getSaturdayWeekId();
-            if (!getAllDrivers().some(driver => driver.name === driverName)) return alert('السائق المحدد غير موجود في الأسطول الحالي.');
-            if (!['hours', 'deduct_hours', 'reward', 'advance', 'custom_rate'].includes(actionType)) return alert('نوع العملية غير صالح.');
-            db.ref(`weeklyRecords/${weekId}/${driverName}`).transaction(rec => {
-                rec = rec || { hours: 0, advances: 0, rewards: 0, days: {} };
-                if (actionType === 'hours') { rec.hours = (Number(rec.hours) || 0) + amount; rec.todayHours = (Number(rec.todayHours) || 0) + amount; }
-                else if (actionType === 'deduct_hours') { rec.hours = Math.max(0, (Number(rec.hours) || 0) - amount); rec.todayHours = Math.max(0, (Number(rec.todayHours) || 0) - amount); }
-                else if (actionType === 'reward') rec.rewards = (Number(rec.rewards) || 0) + amount;
-                else if (actionType === 'advance') rec.advances = (Number(rec.advances) || 0) + amount;
-                else if (actionType === 'custom_rate') rec.customHourlyRate = amount;
-                return rec;
-            }).then(result => {
-                if (!result.committed) return alert('لم يتم تنفيذ العملية.');
-                document.getElementById('adminAmount').value = '';
-                alert('تم تنفيذ العملية وتحديث السجل بنجاح.');
-            }).catch(err => alert('تعذر تنفيذ العملية: ' + err.message));
-        }
+            const amountInput = document.getElementById('adminAmount');
+            const amount = Number(amountInput.value);
+            const weekId = window.currentActiveWeek || getSaturdayWeekId();
+
+            if (!driverName || !Number.isFinite(amount) || amount <= 0) {
+                return alert('تحقق من اختيار السائق وإدخال قيمة أكبر من صفر.');
+            }
+            if (/[.#$\\/\\[\\]]/.test(driverName)) {
+                return alert('اسم السائق يحتوي على رمز لا يسمح به Firebase كمفتاح سجل.');
+            }
+            if (!getAllDrivers().some(driver => driver.name.trim() === driverName)) {
+                return alert('السائق المحدد غير موجود في الأسطول الحالي. حدّث الصفحة وأعد الاختيار.');
+            }
+            if (!['hours', 'deduct_hours', 'reward', 'advance', 'custom_rate'].includes(actionType)) {
+                return alert('نوع العملية غير صالح.');
+            }
+            if (submitButton && submitButton.disabled) return;
+            if (submitButton) { submitButton.disabled = true; submitButton.textContent = 'جارٍ تنفيذ العملية...'; }
+
+            const pendingKey = 'mt_admin_pending_driver_operation';
+            const signature = JSON.stringify({ driverName, actionType, amount, weekId });
+            let pending = null;
+            try { pending = JSON.parse(localStorage.getItem(pendingKey) || 'null'); } catch (_) {}
+            if (!pending || pending.signature !== signature) {
+                const operationId = 'admin_' + Date.now() + '_' + Math.random().toString(36).slice(2, 12);
+                pending = { signature, operationId };
+                localStorage.setItem(pendingKey, JSON.stringify(pending));
+            }
+
+            try {
+                const recordRef = db.ref(`weeklyRecords/${weekId}/${driverName}`);
+                const result = await recordRef.transaction(current => {
+                    const rec = current && typeof current === 'object' ? { ...current } : { hours: 0, advances: 0, rewards: 0, days: {} };
+                    const processed = rec.processedAdminOperationIds && typeof rec.processedAdminOperationIds === 'object'
+                        ? { ...rec.processedAdminOperationIds } : {};
+                    if (processed[pending.operationId]) return;
+                    if (actionType === 'hours') {
+                        rec.hours = (Number(rec.hours) || 0) + amount;
+                        rec.todayHours = (Number(rec.todayHours) || 0) + amount;
+                    } else if (actionType === 'deduct_hours') {
+                        const oldHours = Number(rec.hours) || 0;
+                        const oldToday = Number(rec.todayHours) || 0;
+                        rec.hours = Math.max(0, oldHours - amount);
+                        rec.todayHours = Math.max(0, oldToday - amount);
+                    } else if (actionType === 'reward') {
+                        rec.rewards = (Number(rec.rewards) || 0) + amount;
+                    } else if (actionType === 'advance') {
+                        rec.advances = (Number(rec.advances) || 0) + amount;
+                    } else if (actionType === 'custom_rate') {
+                        rec.customHourlyRate = amount;
+                    }
+                    processed[pending.operationId] = Date.now();
+                    const ids = Object.entries(processed).sort((a, b) => Number(b[1]) - Number(a[1]));
+                    rec.processedAdminOperationIds = Object.fromEntries(ids.slice(0, 100));
+                    return rec;
+                });
+
+                if (!result.committed) {
+                    const saved = result.snapshot && result.snapshot.val();
+                    if (saved && saved.processedAdminOperationIds && saved.processedAdminOperationIds[pending.operationId]) {
+                        localStorage.removeItem(pendingKey);
+                        amountInput.value = '';
+                        renderWeeklyFinancialList();
+                        return alert('هذه العملية نُفذت مسبقاً، ولم تُكرر.');
+                    }
+                    throw new Error('لم تعتمد قاعدة البيانات العملية. لم يتم تغيير السجل.');
+                }
+                localStorage.removeItem(pendingKey);
+                amountInput.value = '';
+                renderWeeklyFinancialList();
+                const actionNames = {
+                    hours: 'إضافة الساعات',
+                    deduct_hours: 'خصم الساعات',
+                    reward: 'إضافة المكافأة',
+                    advance: 'تسجيل السلفة',
+                    custom_rate: 'تعديل أجر الساعة'
+                };
+                alert('تمت ' + actionNames[actionType] + ' للسائق ' + driverName + ' في أسبوع ' + weekId + ' بنجاح.');
+            } catch (err) {
+                alert('تعذر تنفيذ العملية على السائق ' + driverName + ': ' + (err && err.message ? err.message : err) + '\\nلم يتم حذف بيانات السائق. يمكنك إعادة المحاولة بنفس القيم بأمان.');
+            } finally {
+                if (submitButton) { submitButton.disabled = false; submitButton.textContent = 'تنفيذ العملية'; }
+            }
+        };
 
         function renderWeekSelector() {
             const selector = document.getElementById('weekSelector');
