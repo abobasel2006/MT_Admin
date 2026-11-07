@@ -6,7 +6,7 @@ const validShiftTypes = new Set(["day", "night"]);
 function cleanId(value, label) {
   if (typeof value !== "string") throw new Error(`معرف ${label} غير صالح.`);
   const id = value.trim();
-  if (!id || /[.#$\[\]/]/.test(id)) throw new Error(`معرف ${label} غير صالح.`);
+  if (!id || [".", "#", "$", "[", "]", "/"].some(char => id.includes(char))) throw new Error(`معرف ${label} غير صالح.`);
   return id;
 }
 
