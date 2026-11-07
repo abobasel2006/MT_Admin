@@ -801,7 +801,7 @@
             if (!container) return;
 
             const activeShifts = window.appState.activeShifts || {};
-            const activeCarIds = Object.keys(activeShifts);
+            const activeCarIds = Object.keys(activeShifts).filter(carId => activeShifts[carId]);
 
             if (activeCarIds.length === 0) {
                 container.innerHTML = `<p style="text-align: center; color: var(--text-sub); font-size: 11px; padding: 15px;">لا توجد ورديات نشطة حالياً.</p>`;
@@ -809,25 +809,32 @@
             }
 
             container.innerHTML = activeCarIds.map(carId => {
-                const shift = activeShifts[carId];
-                if (!shift) return '';
-                const startTime = shift.timestamp || Date.now();
+                const rawShift = activeShifts[carId];
+                const shift = rawShift && typeof rawShift === 'object' ? rawShift : { driver: String(rawShift || '') };
+                const driverName = getActiveShiftDriverName(shift);
+                if (!driverName) return '';
+                const startTime = getActiveShiftStartTime(shift) || Date.now();
                 const elapsedSecs = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
                 const h = Math.floor(elapsedSecs / 3600);
                 const m = Math.floor((elapsedSecs % 3600) / 60);
                 const s = elapsedSecs % 60;
+                const carRecord = window.appState.cars.find(c => String(c.id) === String(carId));
+                const carLabel = shift.car || (carRecord ? carRecord.plate : carId);
+                const isFinalizing = shift.status === 'finalizing';
+                const storedType = normalizeShiftType(shift.shift || shift.shiftType || shift.type);
+                const shiftLabel = storedType === 'night' ? 'ليلي' : storedType === 'day' ? 'نهاري' : '';
 
                 return `
                     <div class="fin-row" style="margin-bottom: 8px;">
                         <div class="fin-row-top">
                             <div>
-                                <span class="d-name">${escapeHtml(shift.driver)}</span>
-                                <span class="status-pill status-on">🟢 في وردية نشطة</span>
-                                <span class="d-car">(سيارة: ${escapeHtml(shift.car)})</span>
+                                <span class="d-name">${escapeHtml(driverName)}</span>
+                                <span class="status-pill status-on">${isFinalizing ? '🟠 قيد إنهاء الوردية' : '🟢 في وردية نشطة'}</span>
+                                <span class="d-car">(سيارة: ${escapeHtml(carLabel)}${shiftLabel ? ' - ' + shiftLabel : ''})</span>
                             </div>
                             <div style="display:flex; align-items:center; gap:6px;">
                                 <span class="live-timer-badge">⏱️ ${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}</span>
-                                <button class="btn-end-shift" onclick="adminEndShift(${inlineArg(String(carId))}, ${inlineArg(shift.driver)})">🛑 إنهاء الوردية</button>
+                                <button class="btn-end-shift" onclick="adminEndShift(${inlineArg(String(carId))}, ${inlineArg(driverName)})" ${isFinalizing ? 'disabled' : ''}>🛑 إنهاء الوردية</button>
                             </div>
                         </div>
                         <p style="font-size: 10px; color: var(--text-sub);">وقت البدء: ${formatDateTime(startTime)}</p>
@@ -840,28 +847,53 @@
             updateLiveTimersAndSalaries();
         }, 1000);
 
+        function normalizeShiftType(value) {
+            const v = String(value || '').trim().toLowerCase();
+            if (['day', 'daily', 'morning', 'نهاري', 'نهارى', 'نهار', 'صباحي'].includes(v)) return 'day';
+            if (['night', 'evening', 'ليلي', 'ليلى', 'ليل', 'مسائي'].includes(v)) return 'night';
+            return '';
+        }
+
+        function getActiveShiftDriverName(value) {
+            if (typeof value === 'string') return value.trim();
+            if (!value || typeof value !== 'object') return '';
+            return String(value.driver || value.driverName || value.name || '').trim();
+        }
+
+        function getActiveShiftStartTime(value) {
+            if (!value || typeof value !== 'object') return 0;
+            return Number(value.timestamp || value.startTime || value.startedAt || 0);
+        }
+
+        function findActiveShiftForDriver(driver) {
+            const entries = Object.entries(window.appState.activeShifts || {});
+            const expectedType = normalizeShiftType(driver.shift);
+            for (const [carId, value] of entries) {
+                if (getActiveShiftDriverName(value) !== String(driver.name || '').trim()) continue;
+                const storedCarId = value && typeof value === 'object' && value.carId != null ? String(value.carId) : String(carId);
+                if (storedCarId !== String(driver.carId) && String(carId) !== String(driver.carId)) continue;
+                const storedType = normalizeShiftType(value && typeof value === 'object' ? (value.shift || value.shiftType || value.type) : '');
+                if (storedType && expectedType && storedType !== expectedType) continue;
+                return { carId: String(carId), value };
+            }
+            return null;
+        }
+
         function updateLiveTimersAndSalaries() {
             const weekData = window.appState.weeklyRecords[window.currentActiveWeek] || {};
             const drivers = getAllDrivers();
 
             drivers.forEach(d => {
                 const rec = weekData[d.name] || { hours: 0, advances: 0, rewards: 0, todayHours: 0 };
-                
-                let isOnDuty = false;
-                let activeCarId = null;
-                Object.keys(window.appState.activeShifts).forEach(carId => {
-                    let val = window.appState.activeShifts[carId];
-                    let drv = (typeof val === 'object' && val !== null) ? val.driver : val;
-                    if (drv === d.name && String(carId) === String(d.carId) && (!val || typeof val !== 'object' || !val.shift || val.shift === d.shift)) {
-                        isOnDuty = true;
-                        activeCarId = carId;
-                    }
-                });
+                const activeMatch = findActiveShiftForDriver(d);
+                const isOnDuty = Boolean(activeMatch);
+                const activeCarId = activeMatch ? activeMatch.carId : null;
 
                 let liveSecs = 0;
                 let shiftStartTime = null;
                 if (isOnDuty) {
-                    const shiftData = window.appState.activeShifts[activeCarId];
+                    const shiftData = activeMatch.value;
+                    shiftStartTime = getActiveShiftStartTime(shiftData) || rec.imgTimestamp || adminShiftStartTimes[d.name] || Date.now();
                     shiftStartTime = (typeof shiftData === 'object' && shiftData !== null) ? shiftData.timestamp : (rec.imgTimestamp || adminShiftStartTimes[d.name] || Date.now());
                     if (!adminShiftStartTimes[d.name]) adminShiftStartTimes[d.name] = shiftStartTime;
                     liveSecs = Math.max(0, Math.floor((Date.now() - shiftStartTime) / 1000));
